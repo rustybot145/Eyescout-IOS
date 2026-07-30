@@ -31,7 +31,21 @@ yarn-error.*
 *.pem
 
 # local env files
-.env*.local
+# NOTE: `.env*.local` alone is not enough — a plain `.env` would be committed.
+# There is a real one at "EyeScout app/.env" holding SUPABASE_SERVICE_ROLE_KEY,
+# PAYPAL_SECRET, DROPBOX_APP_SECRET and MONDAY_API_KEY. It is currently saved
+# only by a nested .gitignore inside that folder, which is fragile.
+.env
+.env.*
+*.env
+!.env.example
+
+# Reference material — a ~1 GB copy of the web app, plus source videos. None of
+# it belongs in the iOS repo, and the copy contains the .env named above.
+EyeScout app/
+SaaS app /
+hf_*.mp4
+assets/intro-original.mp4
 
 # typescript
 *.tsbuildinfo
@@ -39,3 +53,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Play Console service account (never commit)
+play-service-account.json

@@ -1,0 +1,489 @@
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  Image,
+  Pressable,
+  StyleSheet,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import Animated, {
+  FadeInRight,
+  FadeInLeft,
+  FadeIn,
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withDelay,
+  interpolateColor,
+} from 'react-native-reanimated';
+import { colors, gradient } from '../theme/colors';
+import { fonts } from '../theme/fonts';
+import { Orbs } from './Orbs';
+import { GradientButton } from './GradientButton';
+import { Select } from './Select';
+import { TextField, PasswordField, FieldLabel, ErrorMsg } from './fields';
+import { SPORTS, COACH_SPORTS, GRAD_YEARS, DIVISIONS, TITLES } from '../theme/options';
+import { signUpPlayer, signUpCoach, signInAny, forgotPassword } from '../lib/auth';
+import { toast } from './Overlays';
+
+const logo = require('../../assets/brand/logo.png');
+const isEmail = (v: string) => /\S+@\S+\.\S+/.test(v.trim());
+
+type Role = 'player' | 'coach';
+
+const emptyPlayer = {
+  athlete_first: '', athlete_last: '', email: '', phone: '', school: '', sport: '', jersey_number: '',
+  grad_year: '', parent_first: '', parent_last: '', parent_email: '', parent_phone: '', zip: '',
+  password: '', confirm: '',
+};
+const emptyCoach = { first: '', last: '', university: '', division: '', sport: '', title: '', email: '', password: '', confirm: '' };
+
+const PLAYER_STEPS = 6;
+const COACH_STEPS = 5;
+
+export function SignupQuiz() {
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+
+  const [role, setRole] = useState<Role | null>(null);
+  const [login, setLogin] = useState(false);
+  const [step, setStep] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const dir = useRef(1); // 1 = advancing, -1 = going back — drives the slide direction
+
+  const [pf, setPf] = useState(emptyPlayer);
+  const [cf, setCf] = useState(emptyCoach);
+  const [ageOk, setAgeOk] = useState(false);
+  const setP = (k: keyof typeof pf) => (v: string) => setPf((p) => ({ ...p, [k]: v }));
+  const setC = (k: keyof typeof cf) => (v: string) => setCf((p) => ({ ...p, [k]: v }));
+
+  const total = role === 'coach' ? COACH_STEPS : PLAYER_STEPS;
+
+  // Animated progress fill (0..1) — retweens whenever the step changes.
+  const progress = useSharedValue(0);
+  useEffect(() => {
+    progress.value = withTiming(role ? (step + 1) / total : 0, { duration: 300 });
+  }, [role, step, total, progress]);
+  const barStyle = useAnimatedStyle(() => ({ width: `${progress.value * 100}%` }));
+
+  // Background lights bloom in from black on first mount — smooth handoff from
+  // the intro's black frame to the role screen. Shared-value (not layout entering)
+  // so it always runs and never sticks invisible.
+  const orbsFade = useSharedValue(0);
+  const orbsScale = useSharedValue(0.9);
+  useEffect(() => {
+    orbsFade.value = withDelay(280, withTiming(1, { duration: 1000 }));
+    orbsScale.value = withDelay(280, withTiming(1, { duration: 1400 }));
+  }, [orbsFade, orbsScale]);
+  const orbsStyle = useAnimatedStyle(() => ({ opacity: orbsFade.value, transform: [{ scale: orbsScale.value }] }));
+
+  // Role screen starts pure black (seamless with the intro's black frame), then
+  // the app's dark bg fades up as the color comes in.
+  const bgFade = useSharedValue(0);
+  useEffect(() => {
+    bgFade.value = withDelay(180, withTiming(1, { duration: 900 }));
+  }, [bgFade]);
+  const bgStyle = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(bgFade.value, [0, 1], ['#000000', colors.bg]),
+  }));
+
+  function validateStep(): string {
+    if (role === 'player') {
+      switch (step) {
+        case 0: return pf.athlete_first.trim() && pf.athlete_last.trim() ? '' : 'Please enter your first and last name.';
+        case 1: return !isEmail(pf.email) ? 'Please enter a valid email.' : !pf.phone.trim() ? 'Please enter your phone number.' : '';
+        case 2: return pf.school.trim() && pf.sport ? '' : 'Please add your school and sport.';
+        case 3: return pf.jersey_number.trim() && pf.grad_year ? '' : 'Please add your jersey number and graduation year.';
+        case 4:
+          if (!(pf.parent_first.trim() && pf.parent_last.trim() && pf.parent_phone.trim() && pf.zip.trim())) return 'Please complete the parent/guardian details.';
+          return isEmail(pf.parent_email) ? '' : 'Please enter a valid parent email.';
+        case 5:
+          if (pf.password.length < 8) return 'Password must be at least 8 characters.';
+          if (pf.password !== pf.confirm) return 'Passwords do not match.';
+          return ageOk ? '' : 'Please confirm the athlete is 13 or older.';
+      }
+    } else {
+      switch (step) {
+        case 0: return cf.first.trim() && cf.last.trim() ? '' : 'Please enter your first and last name.';
+        case 1: return cf.university.trim() ? '' : 'Please enter your university or college.';
+        case 2: return cf.division && cf.sport && cf.title ? '' : 'Please select your division, sport, and title.';
+        case 3: return isEmail(cf.email) ? '' : 'Please enter a valid email.';
+        case 4:
+          if (cf.password.length < 8) return 'Password must be at least 8 characters.';
+          return cf.password === cf.confirm ? '' : 'Passwords do not match.';
+      }
+    }
+    return '';
+  }
+
+  async function submit() {
+    setBusy(true);
+    if (role === 'player') {
+      const res = await signUpPlayer(pf);
+      if (!res.ok) { setBusy(false); return setErr(res.error); }
+      // Sales funnel: land the brand-new player on the Pro offer (X → profile).
+      router.replace({ pathname: '/paywall', params: { role: 'player', from: 'signup' } });
+    } else {
+      const res = await signUpCoach(cf);
+      if (!res.ok) { setBusy(false); return setErr(res.error); }
+      toast('Account created — pending verification');
+      router.replace('/coach-pending');
+    }
+  }
+
+  function next() {
+    const e = validateStep();
+    if (e) return setErr(e);
+    setErr('');
+    dir.current = 1;
+    if (step < total - 1) setStep(step + 1);
+    else submit();
+  }
+
+  function back() {
+    setErr('');
+    dir.current = -1;
+    if (step > 0) setStep(step - 1);
+    else setRole(null);
+  }
+
+  const lastStep = step === total - 1;
+  const cta = lastStep ? (role === 'coach' ? 'Create Coach Account' : 'Create Profile') : 'Continue';
+
+  /* ── Login view (returning users) ── */
+  if (login) return <LoginView onBack={() => setLogin(false)} />;
+
+  /* ── Role picker ── */
+  if (!role) {
+    return (
+      <Animated.View style={[styles.root, bgStyle]}>
+        <Animated.View style={[StyleSheet.absoluteFill, orbsStyle]} pointerEvents="none">
+          <Orbs />
+        </Animated.View>
+        <View style={[styles.container, { paddingTop: insets.top + 48, paddingBottom: insets.bottom + 24 }]}>
+          <Animated.View entering={FadeIn.delay(350).duration(650)} style={styles.roleHeader}>
+            <Image source={logo} style={styles.logo} />
+            <Text style={styles.kicker}>Welcome to EyeScout Sports</Text>
+            <Text style={styles.bigQ}>Let's get you set up</Text>
+            <Text style={styles.sub}>First — which one are you?</Text>
+          </Animated.View>
+
+          <Animated.View entering={FadeIn.delay(550).duration(650)} style={{ gap: 14 }}>
+            <RoleCard
+              icon="videocam"
+              title="I'm a Player"
+              blurb="Build your profile, post highlights, and get scouted by verified coaches."
+              onPress={() => { dir.current = 1; setRole('player'); setStep(0); }}
+            />
+            <RoleCard
+              icon="search"
+              title="I'm a Coach"
+              blurb="Discover and recruit the next generation of athletes on the platform."
+              onPress={() => { dir.current = 1; setRole('coach'); setStep(0); }}
+            />
+          </Animated.View>
+
+          <Animated.View entering={FadeIn.delay(750).duration(550)}>
+            <Pressable style={styles.loginLink} onPress={() => setLogin(true)}>
+              <Text style={styles.loginPrompt}>Already have an account? </Text>
+              <Text style={styles.loginAction}>Log in</Text>
+            </Pressable>
+          </Animated.View>
+        </View>
+      </Animated.View>
+    );
+  }
+
+  /* ── Quiz steps ── */
+  return (
+    <View style={styles.root}>
+      <Orbs />
+
+      {/* Header: back + animated progress */}
+      <View style={[styles.stepHeader, { paddingTop: insets.top + 10 }]}>
+        <Pressable onPress={back} hitSlop={10} style={styles.backBtn}>
+          <Ionicons name="arrow-back" size={22} color={colors.white} />
+        </Pressable>
+        <View style={styles.track}>
+          <Animated.View style={[styles.fillWrap, barStyle]}>
+            <LinearGradient
+              colors={gradient.colors}
+              locations={gradient.locations}
+              start={gradient.start}
+              end={gradient.end}
+              style={StyleSheet.absoluteFill}
+            />
+          </Animated.View>
+        </View>
+        <Text style={styles.counter}>{step + 1}/{total}</Text>
+      </View>
+
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 28 }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Animated.View key={`${role}-${step}`} entering={(dir.current > 0 ? FadeInRight : FadeInLeft).duration(300)}>
+            {renderStep()}
+            <ErrorMsg>{err}</ErrorMsg>
+            <View style={{ height: 8 }} />
+            <GradientButton label={cta} onPress={next} loading={busy} />
+          </Animated.View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
+  );
+
+  function renderStep() {
+    if (role === 'player') {
+      switch (step) {
+        case 0:
+          return (
+            <Step q="What's your name?" s="This is how coaches will find you.">
+              <Field label="First Name"><TextField placeholder="Tyler" value={pf.athlete_first} onChangeText={setP('athlete_first')} autoCapitalize="words" /></Field>
+              <Field label="Last Name" last><TextField placeholder="Smith" value={pf.athlete_last} onChangeText={setP('athlete_last')} autoCapitalize="words" /></Field>
+            </Step>
+          );
+        case 1:
+          return (
+            <Step q="How can we reach you?" s="We'll use this to keep your account secure.">
+              <Field label="Email"><TextField placeholder="tyler@email.com" value={pf.email} onChangeText={setP('email')} keyboardType="email-address" autoCapitalize="none" /></Field>
+              <Field label="Phone Number" last><TextField placeholder="(602) 555-0123" value={pf.phone} onChangeText={setP('phone')} keyboardType="phone-pad" /></Field>
+            </Step>
+          );
+        case 2:
+          return (
+            <Step q="Where do you play?" s="Your school and sport power your profile.">
+              <Field label="School / High School"><TextField placeholder="Desert Ridge High School" value={pf.school} onChangeText={setP('school')} autoCapitalize="words" /></Field>
+              <Field label="Sport" last><Select placeholder="Select sport" options={SPORTS} value={pf.sport} onChange={setP('sport')} /></Field>
+            </Step>
+          );
+        case 3:
+          return (
+            <Step q="Tell us about your game" s="A couple details for your player card.">
+              <Field label="Jersey Number"><TextField placeholder="12" value={pf.jersey_number} onChangeText={setP('jersey_number')} keyboardType="number-pad" maxLength={3} /></Field>
+              <Field label="H.S. Graduation Year" last><Select placeholder="Select year" options={GRAD_YEARS} value={pf.grad_year} onChange={setP('grad_year')} /></Field>
+            </Step>
+          );
+        case 4:
+          return (
+            <Step q="Parent or guardian info" s="Required for athletes — they'll co-sign your account.">
+              <Row>
+                <Half><Field label="Parent First"><TextField placeholder="John" value={pf.parent_first} onChangeText={setP('parent_first')} autoCapitalize="words" /></Field></Half>
+                <Half><Field label="Parent Last"><TextField placeholder="Smith" value={pf.parent_last} onChangeText={setP('parent_last')} autoCapitalize="words" /></Field></Half>
+              </Row>
+              <Field label="Parent Email"><TextField placeholder="john@email.com" value={pf.parent_email} onChangeText={setP('parent_email')} keyboardType="email-address" autoCapitalize="none" /></Field>
+              <Row last>
+                <Half><Field label="Parent Phone"><TextField placeholder="(602) 555-0124" value={pf.parent_phone} onChangeText={setP('parent_phone')} keyboardType="phone-pad" /></Field></Half>
+                <Half><Field label="Zip Code"><TextField placeholder="85001" value={pf.zip} onChangeText={setP('zip')} keyboardType="number-pad" maxLength={10} /></Field></Half>
+              </Row>
+            </Step>
+          );
+        case 5:
+          return (
+            <Step q="Secure your account" s="Almost there — set a password.">
+              <Field label="Password"><PasswordField placeholder="Min. 8 characters" value={pf.password} onChangeText={setP('password')} /></Field>
+              <Field label="Confirm Password" last><PasswordField placeholder="Re-enter password" value={pf.confirm} onChangeText={setP('confirm')} /></Field>
+              <Pressable style={styles.checkRow} onPress={() => setAgeOk((v) => !v)}>
+                <View style={[styles.checkbox, ageOk && styles.checkboxOn]}>{ageOk && <Ionicons name="checkmark" size={13} color={colors.white} />}</View>
+                <Text style={styles.checkText}>I confirm the athlete is <Text style={styles.checkStrong}>13 years of age or older</Text>.</Text>
+              </Pressable>
+            </Step>
+          );
+      }
+    } else {
+      switch (step) {
+        case 0:
+          return (
+            <Step q="What's your name?" s="How athletes and staff will see you.">
+              <Field label="First Name"><TextField placeholder="John" value={cf.first} onChangeText={setC('first')} autoCapitalize="words" /></Field>
+              <Field label="Last Name" last><TextField placeholder="Smith" value={cf.last} onChangeText={setC('last')} autoCapitalize="words" /></Field>
+            </Step>
+          );
+        case 1:
+          return (
+            <Step q="Where do you coach?" s="Your program's school or university.">
+              <Field label="University / College" last><TextField placeholder="Arizona State University" value={cf.university} onChangeText={setC('university')} autoCapitalize="words" /></Field>
+            </Step>
+          );
+        case 2:
+          return (
+            <Step q="Your program" s="Helps us route the right athletes to you.">
+              <Field label="Division Level"><Select placeholder="Select division" options={DIVISIONS} value={cf.division} onChange={setC('division')} /></Field>
+              <Row last>
+                <Half><Field label="Sport You Coach"><Select placeholder="Select sport" options={COACH_SPORTS} value={cf.sport} onChange={setC('sport')} /></Field></Half>
+                <Half><Field label="Title"><Select placeholder="Select title" options={TITLES} value={cf.title} onChange={setC('title')} /></Field></Half>
+              </Row>
+            </Step>
+          );
+        case 3:
+          return (
+            <Step q="Your email" s="Use your school or program email if you have one.">
+              <Field label="Email" last><TextField placeholder="coach@university.edu" value={cf.email} onChangeText={setC('email')} keyboardType="email-address" autoCapitalize="none" /></Field>
+            </Step>
+          );
+        case 4:
+          return (
+            <Step q="Secure your account" s="Set a password to finish. We'll verify your account before you scout.">
+              <Field label="Password"><PasswordField placeholder="Min. 8 characters" value={cf.password} onChangeText={setC('password')} /></Field>
+              <Field label="Confirm Password" last><PasswordField placeholder="Re-enter password" value={cf.confirm} onChangeText={setC('confirm')} /></Field>
+            </Step>
+          );
+      }
+    }
+    return null;
+  }
+}
+
+/* ─────────────────────────── Login view ─────────────────────────── */
+function LoginView({ onBack }: { onBack: () => void }) {
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function submit() {
+    setErr('');
+    setBusy(true);
+    const res = await signInAny(email, password);
+    setBusy(false);
+    if (!res.ok) return setErr(res.error);
+    if (res.role === 'coach') router.replace(res.verified ? '/scout' : '/coach-pending');
+    else router.replace('/feed');
+  }
+
+  return (
+    <View style={styles.root}>
+      <Orbs />
+      <View style={[styles.stepHeader, { paddingTop: insets.top + 10 }]}>
+        <Pressable onPress={onBack} hitSlop={10} style={styles.backBtn}>
+          <Ionicons name="arrow-back" size={22} color={colors.white} />
+        </Pressable>
+        <View style={{ flex: 1 }} />
+      </View>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 28 }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <Animated.View entering={FadeIn.duration(300)}>
+            <Image source={logo} style={[styles.logo, { alignSelf: 'center', marginBottom: 16 }]} />
+            <Text style={[styles.bigQ, { textAlign: 'center' }]}>Welcome back</Text>
+            <Text style={[styles.sub, { textAlign: 'center', marginBottom: 24 }]}>Log in to your account.</Text>
+            <Field label="Email"><TextField placeholder="you@email.com" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" /></Field>
+            <Field label="Password" last><PasswordField placeholder="Your password" value={password} onChangeText={setPassword} /></Field>
+            <Pressable style={styles.forgotWrap} onPress={() => onForgot(email)}>
+              <Text style={styles.forgot}>Forgot password?</Text>
+            </Pressable>
+            <ErrorMsg>{err}</ErrorMsg>
+            <View style={{ height: 8 }} />
+            <GradientButton label="Log In" onPress={submit} loading={busy} />
+          </Animated.View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
+  );
+}
+
+function onForgot(email: string) {
+  if (!email.trim()) return toast('Type your email above first', 'err');
+  forgotPassword(email);
+  toast('If an account exists, a reset link is on its way');
+}
+
+/* ─────────────────────────── Building blocks ─────────────────────────── */
+function RoleCard({ icon, title, blurb, onPress }: { icon: keyof typeof Ionicons.glyphMap; title: string; blurb: string; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.roleCard, pressed && styles.roleCardPressed, pressed && { transform: [{ scale: 0.98 }] }]}
+    >
+      <LinearGradient colors={gradient.colors} locations={gradient.locations} start={gradient.start} end={gradient.end} style={styles.roleIconRing}>
+        <View style={styles.roleIconInner}><Ionicons name={icon} size={24} color={colors.white} /></View>
+      </LinearGradient>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.roleTitle}>{title}</Text>
+        <Text style={styles.roleBlurb}>{blurb}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={20} color={colors.faint} />
+    </Pressable>
+  );
+}
+
+function Step({ q, s, children }: { q: string; s: string; children: React.ReactNode }) {
+  return (
+    <View>
+      <Text style={styles.bigQ}>{q}</Text>
+      <Text style={[styles.sub, { marginBottom: 24 }]}>{s}</Text>
+      {children}
+    </View>
+  );
+}
+function Field({ label, children, last }: { label: string; children: React.ReactNode; last?: boolean }) {
+  return (
+    <View style={{ marginBottom: last ? 20 : 16 }}>
+      <FieldLabel required>{label}</FieldLabel>
+      {children}
+    </View>
+  );
+}
+function Row({ children, last }: { children: React.ReactNode; last?: boolean }) {
+  return <View style={[styles.row, { marginBottom: last ? 4 : 0 }]}>{children}</View>;
+}
+function Half({ children }: { children: React.ReactNode }) {
+  return <View style={{ flex: 1 }}>{children}</View>;
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, paddingHorizontal: 20, justifyContent: 'space-between' },
+  scroll: { paddingHorizontal: 20, paddingTop: 20 },
+
+  roleHeader: { alignItems: 'center' },
+  logo: { width: 72, height: 72, borderRadius: 36, resizeMode: 'contain', marginBottom: 14 },
+  kicker: { fontFamily: fonts.cond, fontSize: 12, letterSpacing: 2.4, textTransform: 'uppercase', color: colors.muted, marginBottom: 10 },
+  bigQ: { fontFamily: fonts.display, fontSize: 30, lineHeight: 34, color: colors.white, textAlign: 'left', letterSpacing: 0.5 },
+  sub: { fontFamily: fonts.condRegular, fontSize: 15, color: colors.muted, marginTop: 6 },
+
+  roleCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 15,
+    backgroundColor: colors.card, borderWidth: 1, borderColor: colors.fieldBorder,
+    borderRadius: 18, padding: 18,
+    // layered, color-tinted shadow for elevation (guardrails: no flat shadows)
+    shadowColor: '#1E90FF', shadowOpacity: 0.13, shadowRadius: 18, shadowOffset: { width: 0, height: 8 },
+  },
+  roleCardPressed: { borderColor: colors.blueSoft, backgroundColor: '#1a1a1a' },
+  roleIconRing: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
+  roleIconInner: { width: 47, height: 47, borderRadius: 23.5, backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center' },
+  roleTitle: { fontFamily: fonts.condBold, fontSize: 19, letterSpacing: 1, textTransform: 'uppercase', color: colors.white },
+  roleBlurb: { fontFamily: fonts.condRegular, fontSize: 13.5, color: colors.muted, marginTop: 3, lineHeight: 18 },
+
+  loginLink: { flexDirection: 'row', justifyContent: 'center', paddingVertical: 8 },
+  loginPrompt: { color: colors.muted, fontSize: 13 },
+  loginAction: { color: colors.white, fontSize: 13, fontFamily: fonts.condBold, textDecorationLine: 'underline' },
+
+  stepHeader: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 20, paddingBottom: 14 },
+  backBtn: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center' },
+  track: { flex: 1, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
+  fillWrap: { height: '100%', borderRadius: 3, overflow: 'hidden' },
+  counter: { fontFamily: fonts.cond, fontSize: 13, color: colors.muted, minWidth: 34, textAlign: 'right' },
+
+  row: { flexDirection: 'row', gap: 14 },
+
+  checkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 4 },
+  checkbox: { width: 18, height: 18, borderRadius: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  checkboxOn: { backgroundColor: colors.blue, borderColor: colors.blue },
+  checkText: { flex: 1, fontSize: 13, color: colors.muted, lineHeight: 18 },
+  checkStrong: { color: 'rgba(255,255,255,0.85)', fontWeight: '700' },
+
+  forgotWrap: { alignSelf: 'flex-end', marginBottom: 8, marginTop: -4 },
+  forgot: { fontSize: 12, color: colors.muted, textDecorationLine: 'underline' },
+});

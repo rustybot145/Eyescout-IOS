@@ -2,5 +2,13 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true
-  }
+  },
+  "exclude": [
+    "supabase",
+    "node_modules",
+    "ios",
+    "android",
+    "EyeScout app",
+    "SaaS app "
+  ]
 }
