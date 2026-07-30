@@ -9,7 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { fonts } from '../../src/theme/fonts';
 import { Avatar } from '../../src/components/Avatar';
-import { confirm } from '../../src/components/Overlays';
+import { confirm, openReport } from '../../src/components/Overlays';
 import { CoachThread, ChatMsg, fetchCoachThreads, saveThread, deleteThread } from '../../src/data/messages';
 import { getCurrentCoach } from '../../src/data/coach';
 import { useProAccess } from '../../src/lib/useProAccess';
@@ -98,6 +98,24 @@ export default function CoachInboxScreen() {
     deleteThread(t.id);
   }, []);
 
+  // Report/Block reachable from inside a conversation, not just from posts.
+  const onReport = useCallback((t: CoachThread) => {
+    openReport(
+      {
+        postId: `thread:${t.id}`,
+        authorId: t.playerId || '',
+        authorName: t.playerName || 'this player',
+        caption: 'Reported from a direct message conversation.',
+        mediaData: '',
+        type: 'photo',
+      },
+      () => {
+        setThreads((prev) => prev.filter((x) => x.id !== t.id));
+        setActiveId(null);
+      }
+    );
+  }, []);
+
   if (loading) {
     return (
       <View style={[styles.root, styles.center]}>
@@ -121,6 +139,7 @@ export default function CoachInboxScreen() {
         }}
         onSend={onSend}
         onDelete={() => onDelete(active)}
+        onReport={() => onReport(active)}
         insets={insets}
       />
     );
@@ -180,12 +199,14 @@ function ChatView({
   onBack,
   onSend,
   onDelete,
+  onReport,
   insets,
 }: {
   thread: CoachThread;
   onBack: () => void;
   onSend: (text: string) => void;
   onDelete: () => void;
+  onReport: () => void;
   insets: { top: number; bottom: number };
 }) {
   const [text, setText] = useState('');
@@ -218,6 +239,9 @@ function ChatView({
           </Text>
           {thread.playerSport ? <Text style={styles.chatRole}>{thread.playerSport}</Text> : null}
         </View>
+        <Pressable onPress={onReport} hitSlop={8} style={styles.trashBtn}>
+          <Ionicons name="ellipsis-horizontal" size={18} color={colors.muted} />
+        </Pressable>
         <Pressable onPress={onDelete} hitSlop={8} style={styles.trashBtn}>
           <Ionicons name="trash-outline" size={18} color={colors.muted} />
         </Pressable>

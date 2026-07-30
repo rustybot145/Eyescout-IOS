@@ -20,12 +20,14 @@ export const PostCard = React.memo(function PostCard({
   onHype,
   onFollow,
   onReport,
+  onShare,
 }: {
   post: FeedPost;
   active?: boolean;
   onHype: (p: FeedPost) => void;
   onFollow: (p: FeedPost) => void;
   onReport: (p: FeedPost) => void;
+  onShare?: (p: FeedPost) => void;
 }) {
   const meta = [post.sport, post.sport && post.authorGradYear ? 'Class of ' + post.authorGradYear : '']
     .filter(Boolean)
@@ -82,6 +84,18 @@ export const PostCard = React.memo(function PostCard({
             {formatCount(post.hypeCount)}
           </Text>
         </Pressable>
+        {onShare ? (
+          <Pressable
+            onPress={() => onShare(post)}
+            style={styles.shareBtn}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel="Share this post"
+          >
+            <Ionicons name="paper-plane-outline" size={20} color={colors.muted} />
+            <Text style={styles.shareText}>Share</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       {post.caption ? <Text style={styles.caption}>{post.caption}</Text> : null}
@@ -129,8 +143,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  actions: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingTop: 12, paddingBottom: 4 },
+  actions: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingTop: 12, paddingBottom: 4, gap: 20 },
   hypeBtn: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  shareBtn: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  shareText: { color: colors.muted, fontSize: 14, fontWeight: '700' },
   hypeCount: { color: colors.muted, fontSize: 14, fontWeight: '700' },
   hypeCountOn: { color: '#a855f7' },
   caption: { color: 'rgba(255,255,255,0.9)', fontSize: 14, lineHeight: 20, paddingHorizontal: 14, paddingTop: 6 },

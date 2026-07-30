@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { fetchHiddenIds } from './blocks';
 
 // DMs read/write the SAME messages table the web portal uses. A thread is one
 // row keyed by (player_id, coach_id) with the conversation stored as a `thread`
@@ -20,7 +21,10 @@ export type Thread = {
 const SEL_THREAD = 'id, player_id, coach_id, coach_name, coach_title, coach_school, thread';
 
 export async function fetchThreads(playerId: string): Promise<Thread[]> {
-  const { data } = await supabase.from('messages').select(SEL_THREAD).eq('player_id', playerId);
+  const [{ data }, hidden] = await Promise.all([
+    supabase.from('messages').select(SEL_THREAD).eq('player_id', playerId),
+    fetchHiddenIds(playerId),
+  ]);
   return (data || [])
     .map((r: any) => ({
       id: r.id,
@@ -31,6 +35,9 @@ export async function fetchThreads(playerId: string): Promise<Thread[]> {
       coachSchool: r.coach_school || '',
       messages: Array.isArray(r.thread) ? r.thread : [],
     }))
+    // Blocking hides the conversation too, not just posts (Guideline 1.2 — a
+    // block must actually stop contact, not just hide a feed).
+    .filter((t) => !t.coachId || !hidden.has(t.coachId))
     .sort((a, b) => {
       const la = a.messages[a.messages.length - 1]?.timestamp || '';
       const lb = b.messages[b.messages.length - 1]?.timestamp || '';
@@ -69,8 +76,13 @@ export function deleteThread(id: string) {
 export type CoachThread = Thread & { playerName: string; playerPhoto: string | null; playerSport: string };
 
 export async function fetchCoachThreads(coachId: string): Promise<CoachThread[]> {
-  const { data } = await supabase.from('messages').select(SEL_THREAD).eq('coach_id', coachId);
-  const base: Thread[] = (data || []).map((r: any) => ({
+  const [{ data }, hidden] = await Promise.all([
+    supabase.from('messages').select(SEL_THREAD).eq('coach_id', coachId),
+    fetchHiddenIds(coachId),
+  ]);
+  const base: Thread[] = (data || [])
+    .filter((r: any) => !hidden.has(r.player_id))
+    .map((r: any) => ({
     id: r.id,
     playerId: r.player_id,
     coachId: r.coach_id || null,

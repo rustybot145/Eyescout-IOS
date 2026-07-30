@@ -7,6 +7,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useAppFonts } from '../src/theme/fonts';
 import { colors } from '../src/theme/colors';
 import { OverlayHost } from '../src/components/Overlays';
+import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { supabase } from '../src/lib/supabase';
 import { configurePurchases } from '../src/lib/iap';
 
@@ -39,22 +40,24 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <View style={{ flex: 1, backgroundColor: colors.bg }}>
         <StatusBar style="light" />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: colors.bg },
-            animation: 'fade',
-          }}
-        >
-          <Stack.Screen name="index" />
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="(coach)" />
-          <Stack.Screen name="settings" options={{ animation: 'slide_from_right' }} />
-          <Stack.Screen name="coach-settings" options={{ animation: 'slide_from_right' }} />
-          <Stack.Screen name="coach-pending" />
-          <Stack.Screen name="create-post" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="paywall" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-        </Stack>
+        <ErrorBoundary>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: colors.bg },
+              animation: 'fade',
+            }}
+          >
+            <Stack.Screen name="index" />
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="(coach)" />
+            <Stack.Screen name="settings" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="coach-settings" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="coach-pending" />
+            <Stack.Screen name="create-post" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+            <Stack.Screen name="paywall" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+          </Stack>
+        </ErrorBoundary>
         <OverlayHost />
       </View>
     </SafeAreaProvider>

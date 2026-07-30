@@ -12,6 +12,7 @@ import { PostCard } from '../../src/components/PostCard';
 import { Stories } from '../../src/components/Stories';
 import { PaywallCard } from '../../src/components/Paywall';
 import { openReport } from '../../src/components/Overlays';
+import { sharePost } from '../../src/lib/sharePost';
 import { FeedPost, fetchFeed, toggleHype, toggleFollow } from '../../src/data/feed';
 import { fetchHasPro, fetchFeedPreview } from '../../src/data/subscription';
 import { getCurrentUser, CurrentUser } from '../../src/data/user';
@@ -96,6 +97,11 @@ export default function FeedScreen() {
     [me]
   );
 
+  // Mints a share token, then hands off to the OS share sheet.
+  const onShare = useCallback((p: FeedPost) => {
+    sharePost(p.id);
+  }, []);
+
   // Custom in-app report/block sheet (not a native alert). Blocking drops that
   // author's posts from the list right away; fetchFeed filters them from then on.
   const onReport = useCallback((p: FeedPost) => {
@@ -134,7 +140,7 @@ export default function FeedScreen() {
           data={shown}
           keyExtractor={(p) => p.id}
           renderItem={({ item }) => (
-            <PostCard post={item} active={item.id === activeId} onHype={onHype} onFollow={onFollow} onReport={onReport} />
+            <PostCard post={item} active={item.id === activeId} onHype={onHype} onFollow={onFollow} onReport={onReport} onShare={onShare} />
           )}
           contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
           showsVerticalScrollIndicator={false}

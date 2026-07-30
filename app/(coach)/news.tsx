@@ -10,6 +10,7 @@ import { PostCard } from '../../src/components/PostCard';
 import { Stories } from '../../src/components/Stories';
 import { PaywallCard } from '../../src/components/Paywall';
 import { openReport } from '../../src/components/Overlays';
+import { sharePost } from '../../src/lib/sharePost';
 import { FeedPost, fetchFeed, toggleHype, toggleFollow } from '../../src/data/feed';
 import { fetchHasPro, fetchFeedPreview } from '../../src/data/subscription';
 import { getCurrentCoach, Coach } from '../../src/data/coach';
@@ -92,6 +93,11 @@ export default function CoachNewsScreen() {
     [coach]
   );
 
+  // Mints a share token, then hands off to the OS share sheet.
+  const onShare = useCallback((p: FeedPost) => {
+    sharePost(p.id);
+  }, []);
+
   const onReport = useCallback((p: FeedPost) => {
     openReport({ postId: p.id, authorId: p.authorId, authorName: p.authorName, caption: p.caption, mediaData: p.mediaData, type: p.type });
   }, []);
@@ -113,7 +119,7 @@ export default function CoachNewsScreen() {
           data={shown}
           keyExtractor={(p) => p.id}
           renderItem={({ item }) => (
-            <PostCard post={item} active={item.id === activeId} onHype={onHype} onFollow={onFollow} onReport={onReport} />
+            <PostCard post={item} active={item.id === activeId} onHype={onHype} onFollow={onFollow} onReport={onReport} onShare={onShare} />
           )}
           contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
           showsVerticalScrollIndicator={false}

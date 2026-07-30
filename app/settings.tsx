@@ -103,8 +103,10 @@ export default function SettingsScreen() {
       destructive: true,
     });
     if (!ok) return;
-    // Real deletion runs server-side (service role) — see supabase/functions/delete-user.
-    const { error } = await supabase.functions.invoke('delete-user');
+    // Real deletion runs server-side as a SECURITY DEFINER function that takes
+    // no arguments and derives the account from auth.uid(), so it can only ever
+    // delete the caller. See supabase/migrations/002_production_setup.sql.
+    const { error } = await supabase.rpc('delete_my_account');
     if (error) {
       toast('Could not delete your account. Please try again or contact support.', 'err');
       return;
