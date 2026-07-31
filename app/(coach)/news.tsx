@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator, ViewToken } from 'react-native';
+import { View, Text, FlatList, StyleSheet, RefreshControl, ViewToken } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,6 +7,7 @@ import { colors } from '../../src/theme/colors';
 import { fonts } from '../../src/theme/fonts';
 import { GradientText } from '../../src/components/GradientText';
 import { PostCard } from '../../src/components/PostCard';
+import { FeedSkeleton } from '../../src/components/Skeleton';
 import { Stories } from '../../src/components/Stories';
 import { PaywallCard } from '../../src/components/Paywall';
 import { openReport } from '../../src/components/Overlays';
@@ -114,9 +115,7 @@ export default function CoachNewsScreen() {
       </View>
 
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.blue} />
-        </View>
+        <FeedSkeleton />
       ) : (
         <FlatList
           data={shown}

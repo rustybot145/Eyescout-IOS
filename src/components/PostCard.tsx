@@ -13,6 +13,11 @@ import { timeAgo, formatCount } from '../lib/format';
 const { width } = Dimensions.get('window');
 const MEDIA_W = Math.min(width, 560); // card caps at phone width
 
+// The web's .action-share colour. Deliberately a red-leaning orange rather than
+// the amber used for Pro/upgrade prompts, so share never reads as an upsell —
+// see the comment above .action-share in feed.html.
+const SHARE_ORANGE = '#FF8A3D';
+
 // A single feed post — mirrors feed.html's <article class="post">:
 // header (avatar · name · follow · meta · ⋯), media, hype action, caption, time.
 export const PostCard = React.memo(function PostCard({
@@ -115,7 +120,7 @@ export const PostCard = React.memo(function PostCard({
             accessibilityRole="button"
             accessibilityLabel="Share this post"
           >
-            <Ionicons name="paper-plane-outline" size={20} color={colors.muted} />
+            <Ionicons name="paper-plane-outline" size={20} color={SHARE_ORANGE} />
             <Text style={styles.shareText}>Share</Text>
           </Pressable>
         ) : null}
@@ -170,7 +175,7 @@ const styles = StyleSheet.create({
   hypeBtn: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   // marginLeft:auto pins share to the right edge of the row, opposite hype.
   shareBtn: { flexDirection: 'row', alignItems: 'center', gap: 7, marginLeft: 'auto' },
-  shareText: { color: colors.muted, fontSize: 14, fontWeight: '700' },
+  shareText: { color: SHARE_ORANGE, fontSize: 14, fontWeight: '700' },
   hypeCount: { color: colors.muted, fontSize: 14, fontWeight: '700' },
   hypeCountOn: { color: '#a855f7' },
   caption: { color: 'rgba(255,255,255,0.9)', fontSize: 14, lineHeight: 20, paddingHorizontal: 14, paddingTop: 6 },
