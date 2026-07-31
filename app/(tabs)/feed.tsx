@@ -3,7 +3,7 @@ import {
   View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator, Pressable, ViewToken,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { fonts } from '../../src/theme/fonts';
@@ -22,6 +22,7 @@ const PAGE = 5; // render 5 at a time, like the web feed's batched rendering
 
 export default function FeedScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [me, setMe] = useState<CurrentUser | null>(null);
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [visible, setVisible] = useState(PAGE);
@@ -140,7 +141,7 @@ export default function FeedScreen() {
           data={shown}
           keyExtractor={(p) => p.id}
           renderItem={({ item }) => (
-            <PostCard post={item} active={item.id === activeId} onHype={onHype} onFollow={onFollow} onReport={onReport} onShare={onShare} />
+            <PostCard post={item} active={item.id === activeId} onHype={onHype} onFollow={onFollow} onReport={onReport} onShare={onShare} onOpenAuthor={(p) => router.push(`/player/${p.authorId}`)} />
           )}
           contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
           showsVerticalScrollIndicator={false}

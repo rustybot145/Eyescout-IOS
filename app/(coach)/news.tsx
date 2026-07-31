@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator, ViewToken } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { fonts } from '../../src/theme/fonts';
@@ -22,6 +22,7 @@ const PAGE = 5;
 // hype and follow players from here.
 export default function CoachNewsScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [coach, setCoach] = useState<Coach | null>(null);
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [visible, setVisible] = useState(PAGE);
@@ -119,7 +120,7 @@ export default function CoachNewsScreen() {
           data={shown}
           keyExtractor={(p) => p.id}
           renderItem={({ item }) => (
-            <PostCard post={item} active={item.id === activeId} onHype={onHype} onFollow={onFollow} onReport={onReport} onShare={onShare} />
+            <PostCard post={item} active={item.id === activeId} onHype={onHype} onFollow={onFollow} onReport={onReport} onShare={onShare} onOpenAuthor={(p) => router.push(`/player/${p.authorId}`)} />
           )}
           contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
           showsVerticalScrollIndicator={false}

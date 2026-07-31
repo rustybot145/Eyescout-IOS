@@ -54,6 +54,7 @@ export default function RootLayout() {
             <Stack.Screen name="settings" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="coach-settings" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="coach-pending" />
+            <Stack.Screen name="player/[id]" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="create-post" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
             <Stack.Screen name="paywall" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
           </Stack>

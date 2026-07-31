@@ -1,0 +1,8 @@
+# 004_revenuecat_webhook.sql has the live shared secret that authenticates
+# RevenueCat against our database baked into it. Anyone holding that string can
+# call the webhook and hand out free Pro subscriptions, so the filled-in copy
+# stays out of git. It lives on Ben's machine and, once run, in the database.
+#
+# To rotate: openssl rand -hex 32, edit the file, re-run it in the Supabase SQL
+# editor, then update the Authorization header in the RevenueCat dashboard.
+004_revenuecat_webhook.sql

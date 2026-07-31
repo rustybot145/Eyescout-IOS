@@ -21,6 +21,7 @@ export const PostCard = React.memo(function PostCard({
   onFollow,
   onReport,
   onShare,
+  onOpenAuthor,
 }: {
   post: FeedPost;
   active?: boolean;
@@ -28,19 +29,28 @@ export const PostCard = React.memo(function PostCard({
   onFollow: (p: FeedPost) => void;
   onReport: (p: FeedPost) => void;
   onShare?: (p: FeedPost) => void;
+  // Opens the author's full profile. Optional so a caller with nowhere to
+  // navigate (or a post with no author id) just renders a non-tappable header.
+  onOpenAuthor?: (p: FeedPost) => void;
 }) {
   const meta = [post.sport, post.sport && post.authorGradYear ? 'Class of ' + post.authorGradYear : '']
     .filter(Boolean)
     .join(' · ');
 
+  // Only the avatar and the name open the profile — deliberately NOT the whole
+  // header, which would swallow taps meant for the Follow button next to it.
+  const openAuthor = onOpenAuthor && post.authorId ? () => onOpenAuthor(post) : undefined;
+
   return (
     <View style={styles.card}>
       {/* Header */}
       <View style={styles.header}>
-        <Avatar uri={post.authorPhoto} name={post.authorName} size={42} />
+        <Pressable onPress={openAuthor} disabled={!openAuthor} hitSlop={4}>
+          <Avatar uri={post.authorPhoto} name={post.authorName} size={42} />
+        </Pressable>
         <View style={styles.headText}>
           <View style={styles.nameLine}>
-            <Text style={styles.name} numberOfLines={1}>
+            <Text style={styles.name} numberOfLines={1} onPress={openAuthor}>
               {post.authorName}
               {post.authorJersey ? ` · #${post.authorJersey}` : ''}
             </Text>

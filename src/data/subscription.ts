@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { isProEntitled } from '../lib/iap';
 import { FeedPost } from './feed';
 
 // EyeScout Sports Pro — $15/month. Access is enforced at the DATABASE level by
@@ -14,10 +15,23 @@ import { FeedPost } from './feed';
 export const PRO_PRICE = 15;
 
 // Does the CURRENT signed-in user have Pro / feed access right now?
+//
+// Two independent sources, either of which unlocks:
+//   • the DATABASE (_es_viewer_has_feed_access) — the durable record the web app
+//     and RLS use, written server-side by the RevenueCat webhook.
+//   • the STORE (RevenueCat entitlement) — receipt-validated on RevenueCat's
+//     servers, available the instant a purchase completes.
+//
+// The store check exists because the webhook is asynchronous: without it, a user
+// who just paid through Apple's sheet would bounce off the paywall until the
+// webhook landed. Checked in parallel so this stays one round-trip of latency.
 export async function fetchHasPro(): Promise<boolean> {
-  const { data, error } = await supabase.rpc('_es_viewer_has_feed_access');
-  if (error) return false;
-  return data === true;
+  const [dbRes, entitled] = await Promise.all([
+    supabase.rpc('_es_viewer_has_feed_access'),
+    isProEntitled(),
+  ]);
+  if (entitled) return true;
+  return !dbRes.error && dbRes.data === true;
 }
 
 // The 2-post teaser for a non-Pro user (DB-capped).

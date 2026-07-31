@@ -135,6 +135,19 @@ export async function fetchProfileById(playerId: string): Promise<ProfileData | 
   };
 }
 
+// Is `followerId` currently following `followeeId`? Used by the player profile a
+// coach opens, so the Follow button renders in the right state on arrival
+// instead of flipping after the fact. head+count = no rows transferred.
+export async function fetchIsFollowing(followerId: string, followeeId: string): Promise<boolean> {
+  if (!followerId || !followeeId) return false;
+  const { count } = await supabase
+    .from('follows')
+    .select('*', { count: 'exact', head: true })
+    .eq('follower_id', followerId)
+    .eq('followee_id', followeeId);
+  return (count || 0) > 0;
+}
+
 export function formatHype(n: number): string {
   if (n >= 1000000) return (n / 1000000).toFixed(n % 1000000 >= 100000 ? 1 : 0) + 'M';
   if (n >= 1000) return (n / 1000).toFixed(n % 1000 >= 100 ? 1 : 0) + 'K';

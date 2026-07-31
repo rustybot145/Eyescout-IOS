@@ -121,21 +121,9 @@ export async function signIn(email: string, password: string, expectedRole: 'pla
   return { ok: true, role: actualRole, verified: profile?.verified };
 }
 
-// Quiz login: sign in and route by the account's ACTUAL role (no expected-role
-// guard — the quiz login form doesn't ask player-vs-coach up front).
-export async function signInAny(email: string, password: string): Promise<AuthResult> {
-  const cleanEmail = email.toLowerCase().trim();
-  const { data: authData, error } = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
-  if (error || !authData.user) return { ok: false, error: 'Incorrect email or password.' };
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, verified')
-    .eq('id', authData.user.id)
-    .single();
-
-  return { ok: true, role: (profile?.role || 'player') as 'player' | 'coach', verified: profile?.verified };
-}
+// (signInAny was removed — the login screen now has a Player/Coach tab switcher
+// like the web portal, so every sign-in states its expected role and goes
+// through the guard in signIn above.)
 
 export async function forgotPassword(email: string): Promise<void> {
   const clean = email.toLowerCase().trim();

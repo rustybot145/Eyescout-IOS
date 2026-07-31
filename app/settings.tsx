@@ -17,7 +17,8 @@ import { fetchSettings, updateProfile, SettingsProfile } from '../src/data/setti
 import { getCurrentUserId } from '../src/data/user';
 import { pickMedia } from '../src/lib/pickImage';
 import { uploadToBucket } from '../src/data/media';
-import { toast, confirm } from '../src/components/Overlays';
+import { toast } from '../src/components/Overlays';
+import { deleteAccountFlow } from '../src/lib/account';
 import { openTerms, openPrivacy, openSupport } from '../src/lib/legal';
 import { getSubscription } from '../src/data/subscription';
 import { supabase } from '../src/lib/supabase';
@@ -95,24 +96,7 @@ export default function SettingsScreen() {
   }
 
   async function confirmDelete() {
-    const ok = await confirm({
-      title: 'Delete your account?',
-      message:
-        'This permanently deletes your profile, posts, photos, and messages. This cannot be undone.',
-      confirmText: 'Delete',
-      destructive: true,
-    });
-    if (!ok) return;
-    // Real deletion runs server-side as a SECURITY DEFINER function that takes
-    // no arguments and derives the account from auth.uid(), so it can only ever
-    // delete the caller. See supabase/migrations/002_production_setup.sql.
-    const { error } = await supabase.rpc('delete_my_account');
-    if (error) {
-      toast('Could not delete your account. Please try again or contact support.', 'err');
-      return;
-    }
-    toast('Your account has been deleted');
-    setTimeout(signOut, 900);
+    if (await deleteAccountFlow()) setTimeout(signOut, 900);
   }
 
   if (loading || !p) {

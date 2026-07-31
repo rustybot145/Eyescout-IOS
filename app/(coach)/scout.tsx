@@ -1,24 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, Image, FlatList, StyleSheet, Pressable, TextInput, Modal, ScrollView,
-  RefreshControl, ActivityIndicator, KeyboardAvoidingView, Platform, Dimensions,
+  View, Text, Image, FlatList, StyleSheet, Pressable, TextInput,
+  RefreshControl, ActivityIndicator, Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { fonts } from '../../src/theme/fonts';
-import { Avatar } from '../../src/components/Avatar';
 import { Select } from '../../src/components/Select';
-import { GradientButton } from '../../src/components/GradientButton';
 import { TextField } from '../../src/components/fields';
+import { ComposeMessage } from '../../src/components/ComposeMessage';
 import { toast } from '../../src/components/Overlays';
 import { PaywallScreen } from '../../src/components/Paywall';
 import { useProAccess } from '../../src/lib/useProAccess';
 import { GRAD_YEARS } from '../../src/theme/options';
-import {
-  Coach, PlayerCard, getCurrentCoach, fetchPlayers, fetchSavedPlayerIds, toggleSavePlayer,
-} from '../../src/data/coach';
+import { Coach, PlayerCard, getCurrentCoach, fetchPlayers } from '../../src/data/coach';
 import { sendCoachMessage } from '../../src/data/messages';
 
 const { width } = Dimensions.get('window');
@@ -71,10 +68,10 @@ function matchesSearch(p: PlayerCard, raw: string): boolean {
 
 export default function ScoutScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { hasPro } = useProAccess();
   const [coach, setCoach] = useState<Coach | null>(null);
   const [players, setPlayers] = useState<PlayerCard[]>([]);
-  const [saved, setSaved] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -85,16 +82,13 @@ export default function ScoutScreen() {
   const [stat, setStat] = useState('');
   const [statMin, setStatMin] = useState('');
 
-  const [detail, setDetail] = useState<PlayerCard | null>(null);
   const [composeFor, setComposeFor] = useState<PlayerCard | null>(null);
 
   const load = useCallback(async () => {
     const c = coach || (await getCurrentCoach());
     if (c && !coach) setCoach(c);
     if (!c) return;
-    const [list, savedIds] = await Promise.all([fetchPlayers(), fetchSavedPlayerIds(c.id)]);
-    setPlayers(list);
-    setSaved(savedIds);
+    setPlayers(await fetchPlayers());
   }, [coach]);
 
   // Lock to the coach's own sport (case-insensitive). "Multiple Sports"/blank sees all.
@@ -160,21 +154,6 @@ export default function ScoutScreen() {
       return true;
     });
   }, [sportPlayers, query, year, position, height, stat, statMin]);
-
-  const onToggleSave = useCallback(
-    (p: PlayerCard) => {
-      if (!coach) return;
-      const nowSaved = !saved.has(p.id);
-      setSaved((prev) => {
-        const next = new Set(prev);
-        if (nowSaved) next.add(p.id);
-        else next.delete(p.id);
-        return next;
-      });
-      toggleSavePlayer(coach.id, p.id, nowSaved);
-    },
-    [coach, saved]
-  );
 
   async function sendMessage(player: PlayerCard, text: string) {
     if (!coach) return;
@@ -277,7 +256,14 @@ export default function ScoutScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue} />}
         renderItem={({ item }) => (
-          <PlayerGridCard player={item} onPress={() => setDetail(item)} onMessage={() => setComposeFor(item)} />
+          <PlayerGridCard
+            player={item}
+            // Tapping a card opens the athlete's FULL profile — highlights,
+            // content, stats, and a Follow button — instead of the old
+            // info-only sheet that dead-ended the scouting flow.
+            onPress={() => router.push(`/player/${item.id}`)}
+            onMessage={() => setComposeFor(item)}
+          />
         )}
         ListEmptyComponent={
           <View style={styles.empty}>
@@ -286,21 +272,13 @@ export default function ScoutScreen() {
         }
       />
 
-      {/* Player detail */}
-      <PlayerDetail
-        player={detail}
-        saved={detail ? saved.has(detail.id) : false}
-        onClose={() => setDetail(null)}
-        onSave={() => detail && onToggleSave(detail)}
-        onMessage={() => {
-          const p = detail;
-          setDetail(null);
-          setComposeFor(p);
-        }}
-      />
-
       {/* Compose message */}
-      <ComposeMessage player={composeFor} onClose={() => setComposeFor(null)} onSend={sendMessage} insets={insets} />
+      <ComposeMessage
+        visible={!!composeFor}
+        toName={composeFor ? `${composeFor.first} ${composeFor.last}`.trim() : ''}
+        onClose={() => setComposeFor(null)}
+        onSend={(text) => composeFor && sendMessage(composeFor, text)}
+      />
     </View>
   );
 }
@@ -374,113 +352,6 @@ function Tag({ text }: { text: string }) {
   );
 }
 
-function PlayerDetail({
-  player,
-  saved,
-  onClose,
-  onSave,
-  onMessage,
-}: {
-  player: PlayerCard | null;
-  saved: boolean;
-  onClose: () => void;
-  onSave: () => void;
-  onMessage: () => void;
-}) {
-  const insets = useSafeAreaInsets();
-  if (!player) return null;
-  const name = `${player.first} ${player.last}`.trim();
-  const rows: [string, string][] = [
-    ['Sport', player.sport],
-    ['Position', player.position],
-    ['Class Of', player.gradYear],
-    ['School', player.school],
-    ['Club Team', player.clubTeam],
-    ['Height', player.height],
-    ['Weight', player.weight ? `${player.weight}` : ''],
-    ['Jersey', player.jersey ? `#${player.jersey}` : ''],
-  ].filter(([, v]) => v) as [string, string][];
-
-  return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <Pressable style={styles.sheetOverlay} onPress={onClose}>
-        <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + 20 }]} onPress={(e) => e.stopPropagation()}>
-          <View style={styles.grabber} />
-          <ScrollView showsVerticalScrollIndicator={false}>
-            <View style={styles.detailTop}>
-              <Avatar uri={player.profilePhoto} name={name} size={72} />
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={styles.detailName}>{name || 'Player'}</Text>
-                {player.school ? <Text style={styles.detailSchool}>{player.school}</Text> : null}
-              </View>
-              <Pressable onPress={onSave} hitSlop={8} style={styles.detailSave}>
-                <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={20} color={saved ? colors.blue : colors.muted} />
-              </Pressable>
-            </View>
-
-            {player.bio ? <Text style={styles.detailBio}>{player.bio}</Text> : null}
-
-            <View style={styles.infoCard}>
-              {rows.map(([k, v], i) => (
-                <View key={k} style={[styles.infoRow, i < rows.length - 1 && styles.infoRowBorder]}>
-                  <Text style={styles.infoKey}>{k}</Text>
-                  <Text style={styles.infoVal}>{v}</Text>
-                </View>
-              ))}
-            </View>
-
-            <View style={{ height: 18 }} />
-            <GradientButton label="Send Message" onPress={onMessage} />
-          </ScrollView>
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
-
-function ComposeMessage({
-  player,
-  onClose,
-  onSend,
-  insets,
-}: {
-  player: PlayerCard | null;
-  onClose: () => void;
-  onSend: (p: PlayerCard, text: string) => void;
-  insets: { bottom: number };
-}) {
-  const [text, setText] = useState('');
-  useEffect(() => {
-    if (player) setText('');
-  }, [player]);
-  if (!player) return null;
-  const name = `${player.first} ${player.last}`.trim();
-
-  return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.sheetOverlay}>
-        <Pressable style={{ flex: 1 }} onPress={onClose} />
-        <View style={[styles.compose, { paddingBottom: insets.bottom + 16 }]}>
-          <View style={styles.grabber} />
-          <Text style={styles.composeTitle}>Send Message</Text>
-          <Text style={styles.composeSub}>To: {name}</Text>
-          <TextInput
-            style={styles.composeInput}
-            value={text}
-            onChangeText={setText}
-            placeholder="Introduce yourself and let them know why you're interested…"
-            placeholderTextColor={colors.faint}
-            multiline
-            maxLength={1000}
-            autoFocus
-          />
-          <GradientButton label="Send" onPress={() => text.trim() && onSend(player, text.trim())} disabled={!text.trim()} />
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -536,35 +407,4 @@ const styles = StyleSheet.create({
   },
   lockTitle: { fontSize: 17, fontWeight: '800', color: colors.white, letterSpacing: 0.3, marginBottom: 8 },
   lockBody: { fontSize: 13.5, color: colors.muted, lineHeight: 21, textAlign: 'center', maxWidth: 280 },
-  // detail sheet
-  sheetOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: '#161616', borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', paddingTop: 8, paddingHorizontal: 18, maxHeight: '86%',
-  },
-  grabber: { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.18)', alignSelf: 'center', marginBottom: 14 },
-  detailTop: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },
-  detailName: { fontFamily: fonts.display, fontSize: 24, letterSpacing: 0.5, textTransform: 'uppercase', color: colors.white },
-  detailSchool: { color: colors.muted, fontSize: 13.5, marginTop: 3 },
-  detailSave: {
-    width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
-  },
-  detailBio: { color: 'rgba(255,255,255,0.85)', fontSize: 14, lineHeight: 21, marginBottom: 16 },
-  infoCard: { backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', borderRadius: 14, paddingHorizontal: 16 },
-  infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14 },
-  infoRowBorder: { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
-  infoKey: { fontSize: 12, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', color: colors.muted },
-  infoVal: { fontSize: 14, color: colors.white, fontWeight: '600', flexShrink: 1, textAlign: 'right', marginLeft: 12 },
-  // compose
-  compose: {
-    backgroundColor: '#161616', borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', paddingTop: 8, paddingHorizontal: 18,
-  },
-  composeTitle: { color: colors.white, fontSize: 17, fontWeight: '800', textAlign: 'center' },
-  composeSub: { color: colors.muted, fontSize: 13, textAlign: 'center', marginTop: 4, marginBottom: 14 },
-  composeInput: {
-    backgroundColor: colors.field, borderWidth: 1, borderColor: colors.fieldBorder, borderRadius: 12,
-    padding: 14, color: colors.white, fontSize: 14.5, minHeight: 120, textAlignVertical: 'top', marginBottom: 16,
-  },
 });

@@ -15,6 +15,8 @@ import { Coach, getCurrentCoach, updateCoachProfile } from '../src/data/coach';
 import { pickMedia } from '../src/lib/pickImage';
 import { uploadToBucket } from '../src/data/media';
 import { toast } from '../src/components/Overlays';
+import { deleteAccountFlow } from '../src/lib/account';
+import { openTerms, openPrivacy, openSupport } from '../src/lib/legal';
 import { supabase } from '../src/lib/supabase';
 
 export default function CoachSettingsScreen() {
@@ -79,6 +81,10 @@ export default function CoachSettingsScreen() {
   async function signOut() {
     await supabase.auth.signOut();
     router.replace('/');
+  }
+
+  async function confirmDelete() {
+    if (await deleteAccountFlow()) setTimeout(signOut, 900);
   }
 
   if (loading || !c) {
@@ -162,6 +168,32 @@ export default function CoachSettingsScreen() {
             <Ionicons name="log-out-outline" size={19} color={colors.muted} />
             <Text style={styles.accountText}>Sign Out</Text>
             <Ionicons name="chevron-forward" size={17} color={colors.faint} style={{ marginLeft: 'auto' }} />
+          </Pressable>
+          {/* Guideline 5.1.1(v) applies to every account type, not just players —
+              a coach must be able to delete their account from inside the app. */}
+          <Pressable style={styles.accountRow} onPress={confirmDelete}>
+            <Ionicons name="trash-outline" size={19} color="#ff6b6b" />
+            <Text style={[styles.accountText, { color: '#ff6b6b' }]}>Delete Account</Text>
+            <Ionicons name="chevron-forward" size={17} color="rgba(255,107,107,0.5)" style={{ marginLeft: 'auto' }} />
+          </Pressable>
+        </Section>
+
+        {/* Same legal/support routes the player settings screen exposes. */}
+        <Section title="About" style={{ marginTop: 32 }}>
+          <Pressable style={styles.accountRow} onPress={openTerms}>
+            <Ionicons name="document-text-outline" size={19} color={colors.muted} />
+            <Text style={styles.accountText}>Terms of Use</Text>
+            <Ionicons name="open-outline" size={16} color={colors.faint} style={{ marginLeft: 'auto' }} />
+          </Pressable>
+          <Pressable style={styles.accountRow} onPress={openPrivacy}>
+            <Ionicons name="lock-closed-outline" size={19} color={colors.muted} />
+            <Text style={styles.accountText}>Privacy Policy</Text>
+            <Ionicons name="open-outline" size={16} color={colors.faint} style={{ marginLeft: 'auto' }} />
+          </Pressable>
+          <Pressable style={styles.accountRow} onPress={openSupport}>
+            <Ionicons name="help-circle-outline" size={19} color={colors.muted} />
+            <Text style={styles.accountText}>Help &amp; Support</Text>
+            <Ionicons name="open-outline" size={16} color={colors.faint} style={{ marginLeft: 'auto' }} />
           </Pressable>
         </Section>
       </ScrollView>

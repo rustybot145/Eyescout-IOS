@@ -11,16 +11,18 @@ export type ViewerMedia = { uri: string; kind: 'photo' | 'video' };
 // to fit the screen, videos play with native controls. The account owner gets a
 // three-dots menu in the corner to delete the item (the red action doubles as the
 // confirmation, iOS action-sheet style).
+// canDelete/onDelete are optional: viewing SOMEONE ELSE's profile opens this
+// same viewer with no owner actions at all (see app/player/[id].tsx).
 export function MediaViewer({
   item,
-  canDelete,
+  canDelete = false,
   onClose,
   onDelete,
 }: {
   item: ViewerMedia | null;
-  canDelete: boolean;
+  canDelete?: boolean;
   onClose: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const [menu, setMenu] = useState(false);
@@ -59,7 +61,7 @@ export function MediaViewer({
                 style={styles.menuRow}
                 onPress={() => {
                   setMenu(false);
-                  onDelete();
+                  onDelete?.();
                 }}
               >
                 <Ionicons name="trash-outline" size={19} color="#ff4d6d" />

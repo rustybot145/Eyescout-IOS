@@ -101,6 +101,26 @@ export async function purchasePro(): Promise<PurchaseResult> {
   }
 }
 
+// Does the store itself say this user is entitled to Pro right now?
+//
+// This is the receipt-backed truth: RevenueCat validates the Apple/Google receipt
+// on THEIR servers and caches the verdict in the SDK, so a purchase unlocks the
+// app the instant it completes — with no dependency on our webhook having landed
+// yet. `fetchHasPro()` ORs this with the database answer, which is what keeps a
+// paying user from staring at a paywall they already bought through.
+//
+// Never throws: any failure (offline, SDK not configured) reads as "not entitled"
+// and we fall back to the DB, which is the durable cross-platform record.
+export async function isProEntitled(): Promise<boolean> {
+  if (!isIapAvailable()) return false;
+  try {
+    const info = await Purchases.getCustomerInfo();
+    return !!info.entitlements.active[PRO_ENTITLEMENT_ID];
+  } catch {
+    return false;
+  }
+}
+
 // Both stores REQUIRE a "Restore Purchases" path on every subscription paywall.
 export async function restorePro(): Promise<PurchaseResult> {
   if (!isIapAvailable()) {

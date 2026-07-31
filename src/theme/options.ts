@@ -1,14 +1,25 @@
 // Dropdown option sets, matching the web login.html <select> lists exactly.
+//
+// The gendered splits (Boys/Girls Basketball, Soccer, Volleyball, Lacrosse) are
+// the web's current lists verbatim — coach scouting matches a player's `sport`
+// string against the coach's own, so any drift between the two apps silently
+// hides players from the coaches recruiting them. Keep these in lockstep with
+// eyescout-site/social-app/login.html.
+const BASE_SPORTS = [
+  'Football',
+  'Boys Basketball', 'Girls Basketball',
+  'Baseball', 'Softball',
+  'Boys Soccer', 'Girls Soccer',
+  'Boys Volleyball', 'Girls Volleyball',
+  'Track & Field', 'Wrestling',
+  'Boys Lacrosse', 'Girls Lacrosse',
+  'Tennis', 'Swimming', 'Cross Country',
+];
 
-export const SPORTS = [
-  'Football', 'Basketball', 'Baseball', 'Softball', 'Soccer', 'Track & Field',
-  'Volleyball', 'Wrestling', 'Lacrosse', 'Tennis', 'Swimming', 'Cross Country', 'Other',
-].map((s) => ({ label: s, value: s }));
+export const SPORTS = [...BASE_SPORTS, 'Other'].map((s) => ({ label: s, value: s }));
 
-export const COACH_SPORTS = [
-  'Football', 'Basketball', 'Baseball', 'Softball', 'Soccer', 'Track & Field',
-  'Volleyball', 'Wrestling', 'Lacrosse', 'Tennis', 'Swimming', 'Cross Country', 'Multiple Sports',
-].map((s) => ({ label: s, value: s }));
+// Coaches get "Multiple Sports" (sees every athlete) instead of "Other".
+export const COACH_SPORTS = [...BASE_SPORTS, 'Multiple Sports'].map((s) => ({ label: s, value: s }));
 
 export const GRAD_YEARS = ['2025', '2026', '2027', '2028', '2029', '2030', '2031', '2032'].map((y) => ({
   label: y,

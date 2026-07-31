@@ -3,7 +3,7 @@ import {
   View, Text, Image, ScrollView, StyleSheet, Pressable, RefreshControl, ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors, gradient } from '../../src/theme/colors';
@@ -12,26 +12,30 @@ import { GradientText } from '../../src/components/GradientText';
 import { HypeStar } from '../../src/components/HypeStar';
 import { Cover, Stat, EmptyState, MediaGrid } from '../../src/components/ProfilePieces';
 import { MediaViewer } from '../../src/components/MediaViewer';
-import { fetchMyProfile, formatHype, ProfileData, Player } from '../../src/data/profile';
-import { pickMedia } from '../../src/lib/pickImage';
+import { ComposeMessage } from '../../src/components/ComposeMessage';
+import { confirm, toast } from '../../src/components/Overlays';
 import {
-  uploadToBucket, addOwnMedia, deleteDeliveredPhoto, deleteOwnMedia, deletePostById,
-} from '../../src/data/media';
-import { toast } from '../../src/components/Overlays';
-import { useProAccess } from '../../src/lib/useProAccess';
-import { supabase } from '../../src/lib/supabase';
+  fetchProfileById, fetchIsFollowing, formatHype, ProfileData, Player,
+} from '../../src/data/profile';
+import { toggleFollow } from '../../src/data/feed';
+import { getCurrentCoach, Coach, fetchSavedPlayerIds, toggleSavePlayer } from '../../src/data/coach';
+import { sendCoachMessage } from '../../src/data/messages';
+import { blockUser } from '../../src/data/blocks';
+import { getCurrentUser } from '../../src/data/user';
 
-// A grid item plus where it lives, so the owner can delete the right thing.
-type MediaSource =
-  | { type: 'delivered'; url: string }
-  | { type: 'own'; mediaKind: 'photo' | 'video'; url: string }
-  | { type: 'post'; postId: string };
-type ProfileMedia = { uri: string; kind: 'photo' | 'video'; source: MediaSource };
+// A player's profile as seen by SOMEONE ELSE — this is what opens when a coach
+// taps a card on the Scout screen. Before this existed, tapping a player showed
+// a small info sheet with no highlights and no way to follow, which meant the
+// scouting flow stopped exactly where a coach would want to go deeper.
+//
+// Read-only on purpose: no upload, no delete, no edit. It reads through the same
+// fetchProfileById() the player's own profile tab uses, so a coach sees exactly
+// what the athlete published — Content, Highlights, Info and Stats.
 
-type TabKey = 'content' | 'posted' | 'highlights' | 'info' | 'stats';
+type Tile = { uri: string; kind: 'photo' | 'video' };
+type TabKey = 'content' | 'highlights' | 'info' | 'stats';
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'content', label: 'Content' },
-  { key: 'posted', label: 'Posted' },
   { key: 'highlights', label: 'Highlights' },
   { key: 'info', label: 'Info' },
   { key: 'stats', label: 'Stats' },
@@ -39,26 +43,43 @@ const TABS: { key: TabKey; label: string }[] = [
 
 const mediaUri = (m: { url?: string; dataUrl?: string }) => m.url || m.dataUrl || '';
 
-export default function ProfileScreen() {
+export default function PlayerProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { hasPro } = useProAccess();
+  const { id } = useLocalSearchParams<{ id: string }>();
+
   const [data, setData] = useState<ProfileData | null>(null);
+  const [viewerId, setViewerId] = useState<string | null>(null);
+  const [coach, setCoach] = useState<Coach | null>(null);
+  const [following, setFollowing] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [tab, setTab] = useState<TabKey>('content');
-  const [viewer, setViewer] = useState<ProfileMedia | null>(null);
+  const [media, setMedia] = useState<Tile | null>(null);
+  const [composing, setComposing] = useState(false);
   const [focused, setFocused] = useState(true);
 
   const load = useCallback(async () => {
-    const res = await fetchMyProfile();
-    if (!res) {
-      router.replace('/');
+    if (!id) return;
+    const [profile, me] = await Promise.all([fetchProfileById(id), getCurrentUser()]);
+    setData(profile);
+    setViewerId(me?.id ?? null);
+    if (!me) return;
+
+    setFollowing(await fetchIsFollowing(me.id, id));
+
+    // Message and Save-to-recruit-list are coach tools; Follow is for everyone.
+    // getCurrentCoach() would happily return a row for a player too, so the role
+    // on the profile is what decides, not the shape of the row.
+    if (me.role !== 'coach') {
+      setCoach(null);
       return;
     }
-    setData(res);
-  }, [router]);
+    const c = await getCurrentCoach();
+    setCoach(c);
+    if (c) setSaved((await fetchSavedPlayerIds(c.id)).has(id));
+  }, [id]);
 
   useEffect(() => {
     (async () => {
@@ -68,14 +89,12 @@ export default function ProfileScreen() {
     })();
   }, [load]);
 
-  // Pull fresh admin-controlled data whenever the profile tab regains focus, and
-  // track focus so inline Highlights videos pause when you leave the tab.
+  // Pause inline Highlights videos when this screen loses focus.
   useFocusEffect(
     useCallback(() => {
       setFocused(true);
-      load();
       return () => setFocused(false);
-    }, [load])
+    }, [])
   );
 
   const onRefresh = useCallback(async () => {
@@ -84,65 +103,51 @@ export default function ProfileScreen() {
     setRefreshing(false);
   }, [load]);
 
-  async function signOut() {
-    await supabase.auth.signOut();
-    router.replace('/');
+  function onToggleFollow() {
+    if (!viewerId || !id) return;
+    const next = !following;
+    setFollowing(next); // optimistic — the write is fire-and-forget, like the feed
+    toggleFollow(viewerId, id, next);
+    // Keep the follower count honest without a full refetch.
+    setData((d) => (d ? { ...d, followers: Math.max(0, d.followers + (next ? 1 : -1)) } : d));
   }
 
-  // Add Photos — pick from library, upload to the SAME Supabase `posts` bucket the
-  // web + admin use, then append to own_photos/own_clips (shows in Content).
-  //
-  // Pro-only. Free players still get everything the ADMIN delivers to them
-  // (delivered_photos from a shoot) — this gates uploading your OWN media, which
-  // is the paid perk. `hasPro === null` means the check is still in flight, so we
-  // send them to the paywall rather than opening a picker whose upload may fail.
-  async function addPhotos() {
-    if (!data) return;
-    if (!hasPro) {
-      router.push({ pathname: '/paywall', params: { role: 'player' } });
-      return;
-    }
+  function onToggleSave() {
+    if (!coach || !id) return;
+    const next = !saved;
+    setSaved(next);
+    toggleSavePlayer(coach.id, id, next);
+    toast(next ? 'Added to your recruit list' : 'Removed from your recruit list');
+  }
+
+  async function onSend(text: string) {
+    if (!coach || !id) return;
+    const { error } = await sendCoachMessage(coach, id, text);
+    setComposing(false);
+    toast(error ? 'Could not send' : `Message sent to ${data?.player.athleteFirst || 'player'}`, error ? 'err' : 'ok');
+  }
+
+  // Play UGC / Apple 1.2: any profile showing user content needs a way out.
+  async function onBlock() {
+    if (!viewerId || !id) return;
+    const who = `${data?.player.athleteFirst ?? ''} ${data?.player.athleteLast ?? ''}`.trim();
+    const ok = await confirm({
+      title: `Block ${who || 'this user'}?`,
+      message: "You won't see each other's posts or messages. You can undo this later.",
+      confirmText: 'Block',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
-      const picked = await pickMedia({ videos: true, multiple: true });
-      if (!picked.length) return;
-      setUploading(true);
-      const uploaded: { url: string; kind: 'photo' | 'video' }[] = [];
-      for (const item of picked) {
-        const url = await uploadToBucket('posts', data.player.id, item.uri, item.mime);
-        uploaded.push({ url, kind: item.kind });
-      }
-      await addOwnMedia(data.player.id, uploaded);
-      await load();
-      toast(`Added ${uploaded.length} ${uploaded.length === 1 ? 'item' : 'items'} to your content`);
-    } catch (err: any) {
-      toast(err?.message || 'Upload failed', 'err');
-    } finally {
-      setUploading(false);
+      await blockUser(viewerId, id);
+      toast('Blocked');
+      router.back();
+    } catch {
+      toast('Could not block right now', 'err');
     }
   }
 
-  // Delete the item currently open in the viewer (owner only). Routes to the
-  // right store: delivered_photos / own_photos / own_clips / posts.
-  async function deleteViewerItem() {
-    if (!viewer || !data) return;
-    const uid = data.player.id;
-    const src = viewer.source;
-    const res =
-      src.type === 'delivered'
-        ? await deleteDeliveredPhoto(uid, src.url)
-        : src.type === 'own'
-        ? await deleteOwnMedia(uid, src.mediaKind, src.url)
-        : await deletePostById(src.postId);
-    if (res.error) {
-      toast('Could not delete', 'err');
-      return;
-    }
-    setViewer(null);
-    await load();
-    toast('Deleted');
-  }
-
-  if (loading || !data) {
+  if (loading) {
     return (
       <View style={[styles.root, styles.center]}>
         <ActivityIndicator color={colors.blue} />
@@ -150,31 +155,31 @@ export default function ProfileScreen() {
     );
   }
 
+  if (!data) {
+    return (
+      <View style={[styles.root, styles.center, { paddingHorizontal: 40 }]}>
+        <Text style={styles.missing}>This profile isn't available.</Text>
+        <Pressable style={styles.backPill} onPress={() => router.back()}>
+          <Text style={styles.backPillText}>Go Back</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   const p = data.player;
   const name = `${p.athleteFirst} ${p.athleteLast}`.trim();
   const handle = `${p.sport}${p.position ? ' · ' + p.position : ''}`;
+  const isMe = viewerId === p.id;
 
-  const contentMedia: ProfileMedia[] = [
-    ...p.deliveredPhotos.map((uri) => ({ uri, kind: 'photo' as const, source: { type: 'delivered' as const, url: uri } })),
-    ...p.ownPhotos.map((m) => {
-      const uri = mediaUri(m);
-      return { uri, kind: 'photo' as const, source: { type: 'own' as const, mediaKind: 'photo' as const, url: uri } };
-    }),
-    ...p.ownClips.map((m) => {
-      const uri = mediaUri(m);
-      return { uri, kind: 'video' as const, source: { type: 'own' as const, mediaKind: 'video' as const, url: uri } };
-    }),
+  const contentMedia: Tile[] = [
+    ...p.deliveredPhotos.map((uri) => ({ uri, kind: 'photo' as const })),
+    ...p.ownPhotos.map((m) => ({ uri: mediaUri(m), kind: 'photo' as const })),
+    ...p.ownClips.map((m) => ({ uri: mediaUri(m), kind: 'video' as const })),
   ].filter((t) => t.uri);
 
-  const postedMedia: ProfileMedia[] = data.posts
-    .filter((po) => (po.type === 'photo' || po.type === 'video') && po.mediaData)
-    .map((po) => ({ uri: po.mediaData, kind: po.type, source: { type: 'post' as const, postId: po.id } }));
-
-  const highlightMedia: ProfileMedia[] = data.posts
+  const highlightMedia: Tile[] = data.posts
     .filter((po) => po.type === 'video' && po.mediaData)
-    .map((po) => ({ uri: po.mediaData, kind: 'video' as const, source: { type: 'post' as const, postId: po.id } }));
-
-  const postCount = contentMedia.length;
+    .map((po) => ({ uri: po.mediaData, kind: 'video' as const }));
 
   return (
     <View style={styles.root}>
@@ -183,18 +188,23 @@ export default function ProfileScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue} />}
         showsVerticalScrollIndicator={false}
       >
-        {/* top row: title + settings gear */}
         <View style={[styles.topbar, { paddingTop: insets.top + 8 }]}>
-          <Text style={styles.topbarTitle}>MY PROFILE</Text>
-          <Pressable onPress={() => router.push('/settings')} hitSlop={8} style={styles.gear}>
-            <Ionicons name="settings-outline" size={20} color={colors.muted} />
+          <Pressable onPress={() => router.back()} hitSlop={10} style={styles.iconBtn}>
+            <Ionicons name="arrow-back" size={22} color={colors.white} />
           </Pressable>
+          <Text style={styles.topbarTitle} numberOfLines={1}>{name || 'PLAYER'}</Text>
+          {isMe ? (
+            <View style={styles.iconBtn} />
+          ) : (
+            <Pressable onPress={onBlock} hitSlop={10} style={styles.iconBtn}>
+              <Ionicons name="ellipsis-horizontal" size={20} color={colors.muted} />
+            </Pressable>
+          )}
         </View>
 
         <Cover />
 
         <View style={styles.section}>
-          {/* Avatar */}
           <LinearGradient
             colors={gradient.colors}
             locations={gradient.locations}
@@ -211,7 +221,6 @@ export default function ProfileScreen() {
             </View>
           </LinearGradient>
 
-          {/* Name + hype + handle */}
           <View style={styles.nameRow}>
             <Text style={styles.name}>{name || 'Player Name'}</Text>
             <View style={styles.hype}>
@@ -221,7 +230,6 @@ export default function ProfileScreen() {
           </View>
           <Text style={styles.handle}>{handle}</Text>
 
-          {/* School — shown right under the handle, above the action buttons */}
           {p.school ? (
             <View style={styles.schoolLine}>
               <Ionicons name="school-outline" size={15} color={colors.muted} />
@@ -229,29 +237,43 @@ export default function ProfileScreen() {
             </View>
           ) : null}
 
-          {/* Actions */}
-          <View style={styles.actions}>
-            <Pressable style={styles.btnOutline} onPress={() => router.push('/settings')}>
-              <Ionicons name="create-outline" size={15} color="rgba(255,255,255,0.75)" />
-              <Text style={styles.btnOutlineText}>Edit Profile</Text>
-            </Pressable>
-            <Pressable style={styles.btnOutline} onPress={addPhotos} disabled={uploading}>
-              {uploading ? (
-                <ActivityIndicator size="small" color="rgba(255,255,255,0.75)" />
-              ) : (
+          {/* Viewing your own profile from a link — no self-follow, no self-DM. */}
+          {isMe ? null : (
+            <View style={styles.actions}>
+              <Pressable
+                style={[styles.btnPrimary, following && styles.btnFollowing]}
+                onPress={onToggleFollow}
+              >
                 <Ionicons
-                  name={hasPro ? 'add' : 'lock-closed'}
-                  size={hasPro ? 17 : 14}
-                  color="rgba(255,255,255,0.75)"
+                  name={following ? 'checkmark' : 'add'}
+                  size={16}
+                  color={following ? 'rgba(255,255,255,0.75)' : '#fff'}
                 />
-              )}
-              <Text style={styles.btnOutlineText}>{uploading ? 'Uploading…' : 'Add Photos'}</Text>
-            </Pressable>
-          </View>
+                <Text style={[styles.btnPrimaryText, following && styles.btnFollowingText]}>
+                  {following ? 'Following' : 'Follow'}
+                </Text>
+              </Pressable>
 
-          {/* Stats */}
+              {coach ? (
+                <>
+                  <Pressable style={styles.btnOutline} onPress={() => setComposing(true)}>
+                    <Ionicons name="chatbubble-outline" size={15} color="rgba(255,255,255,0.75)" />
+                    <Text style={styles.btnOutlineText}>Message</Text>
+                  </Pressable>
+                  <Pressable style={styles.btnIcon} onPress={onToggleSave}>
+                    <Ionicons
+                      name={saved ? 'bookmark' : 'bookmark-outline'}
+                      size={18}
+                      color={saved ? colors.blue : 'rgba(255,255,255,0.75)'}
+                    />
+                  </Pressable>
+                </>
+              ) : null}
+            </View>
+          )}
+
           <View style={styles.statsRow}>
-            <Stat num={postCount} label="Posts" />
+            <Stat num={contentMedia.length} label="Posts" />
             <Stat num={data.followers} label="Followers" />
             <Stat num={data.following} label="Following" />
             <Stat num={p.gradYear || '—'} label="Class" />
@@ -259,7 +281,6 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        {/* Tab bar */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabBar} contentContainerStyle={{ paddingHorizontal: 16 }}>
           {TABS.map((t) => {
             const active = t.key === tab;
@@ -271,36 +292,18 @@ export default function ProfileScreen() {
           })}
         </ScrollView>
 
-        {/* Tab content */}
         <View style={styles.tabContent}>
           {tab === 'content' &&
             (contentMedia.length ? (
-              <MediaGrid tiles={contentMedia} onPressItem={(i) => setViewer(contentMedia[i])} />
+              <MediaGrid tiles={contentMedia} onPressItem={(i) => setMedia(contentMedia[i])} />
             ) : (
-              <EmptyState
-                label={
-                  hasPro
-                    ? 'No content yet — tap Add Photos to upload.'
-                    : 'No content yet. Go Pro to upload your own photos and clips.'
-                }
-              />
-            ))}
-          {tab === 'posted' &&
-            (postedMedia.length ? (
-              <MediaGrid
-                tiles={postedMedia}
-                onPressItem={(i) => setViewer(postedMedia[i])}
-                autoplayVideos
-                videosActive={focused}
-              />
-            ) : (
-              <EmptyState label="No posted content yet" />
+              <EmptyState label="No content yet" />
             ))}
           {tab === 'highlights' &&
             (highlightMedia.length ? (
               <MediaGrid
                 tiles={highlightMedia}
-                onPressItem={(i) => setViewer(highlightMedia[i])}
+                onPressItem={(i) => setMedia(highlightMedia[i])}
                 autoplayVideos
                 videosActive={focused}
               />
@@ -312,12 +315,14 @@ export default function ProfileScreen() {
         </View>
       </ScrollView>
 
-      {/* Fullscreen viewer — expands a tapped photo/video; owner can delete via ··· */}
-      <MediaViewer
-        item={viewer ? { uri: viewer.uri, kind: viewer.kind } : null}
-        canDelete
-        onClose={() => setViewer(null)}
-        onDelete={deleteViewerItem}
+      {/* canDelete is deliberately absent — you can never delete someone else's media. */}
+      <MediaViewer item={media} onClose={() => setMedia(null)} />
+
+      <ComposeMessage
+        visible={composing}
+        toName={name || 'Player'}
+        onClose={() => setComposing(false)}
+        onSend={onSend}
       />
     </View>
   );
@@ -332,6 +337,7 @@ function InfoTab({ player }: { player: Player }) {
     ['Club Team', player.clubTeam],
     ['Height', player.height],
     ['Weight', player.weight],
+    ['Jersey', player.jersey ? `#${player.jersey}` : ''],
   ].filter(([, v]) => v) as [string, string][];
 
   return (
@@ -370,20 +376,25 @@ function StatsTab({ player }: { player: Player }) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   center: { alignItems: 'center', justifyContent: 'center' },
+  missing: { color: colors.muted, fontSize: 15, textAlign: 'center', marginBottom: 18 },
+  backPill: {
+    paddingVertical: 10, paddingHorizontal: 22, borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
+  },
+  backPillText: { color: 'rgba(255,255,255,0.8)', fontSize: 13.5, fontWeight: '700' },
   topbar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingBottom: 10, backgroundColor: colors.bg,
+    paddingHorizontal: 12, paddingBottom: 10, backgroundColor: colors.bg,
   },
-  topbarTitle: { fontFamily: fonts.condBold, fontSize: 14, letterSpacing: 2, color: colors.muted },
-  gear: {
-    width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+  topbarTitle: {
+    flex: 1, textAlign: 'center', marginHorizontal: 8,
+    fontFamily: fonts.condBold, fontSize: 14, letterSpacing: 2, color: colors.muted, textTransform: 'uppercase',
   },
+  iconBtn: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   section: { paddingHorizontal: 16 },
   avatarWrap: {
     width: 110, height: 110, borderRadius: 55, padding: 3,
-    backgroundColor: colors.blue,
-    marginTop: -55, marginBottom: 16,
+    backgroundColor: colors.blue, marginTop: -55, marginBottom: 16,
   },
   avatarInner: {
     flex: 1, borderRadius: 55, backgroundColor: '#1a1a1a',
@@ -394,20 +405,31 @@ const styles = StyleSheet.create({
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 14, flexWrap: 'wrap' },
   name: { fontFamily: fonts.display, fontSize: 34, letterSpacing: 1, textTransform: 'uppercase', color: colors.white },
   hype: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  hypeGlow: {
-    shadowColor: '#a855f7', shadowOpacity: 0.5, shadowRadius: 8, shadowOffset: { width: 0, height: 0 },
-  },
+  hypeGlow: { shadowColor: '#a855f7', shadowOpacity: 0.5, shadowRadius: 8, shadowOffset: { width: 0, height: 0 } },
   hypeNum: { fontSize: 16, fontWeight: '800', color: colors.white },
   handle: { fontSize: 15, fontWeight: '700', color: colors.white, marginTop: 6, marginBottom: 14 },
   schoolLine: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: -4, marginBottom: 16 },
   schoolText: { fontSize: 14, fontWeight: '600', color: colors.muted },
-  actions: { flexDirection: 'row', gap: 10, marginBottom: 20 },
+  actions: { flexDirection: 'row', gap: 10, marginBottom: 20, alignItems: 'center' },
+  btnPrimary: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingVertical: 9, paddingHorizontal: 22, borderRadius: 10, backgroundColor: colors.blue,
+  },
+  btnPrimaryText: { fontSize: 13, fontWeight: '700', color: '#fff' },
+  btnFollowing: {
+    backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
+  },
+  btnFollowingText: { color: 'rgba(255,255,255,0.75)' },
   btnOutline: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingVertical: 9, paddingHorizontal: 18, borderRadius: 10,
     backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
   },
   btnOutlineText: { fontSize: 13, fontWeight: '700', color: 'rgba(255,255,255,0.75)' },
+  btnIcon: {
+    width: 40, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
+  },
   statsRow: {
     flexDirection: 'row', gap: 28, paddingVertical: 20, flexWrap: 'wrap',
     borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)',

@@ -30,7 +30,8 @@ import { GradientButton } from './GradientButton';
 import { Select } from './Select';
 import { TextField, PasswordField, FieldLabel, ErrorMsg } from './fields';
 import { SPORTS, COACH_SPORTS, GRAD_YEARS, DIVISIONS, TITLES, BIRTH_MONTHS, BIRTH_DAYS, BIRTH_YEARS } from '../theme/options';
-import { signUpPlayer, signUpCoach, signInAny, forgotPassword } from '../lib/auth';
+import { signUpPlayer, signUpCoach, signIn, forgotPassword } from '../lib/auth';
+import { RoleSwitch } from './RoleSwitch';
 import { toast } from './Overlays';
 
 const logo = require('../../assets/brand/logo.png');
@@ -389,9 +390,15 @@ export function SignupQuiz() {
 }
 
 /* ─────────────────────────── Login view ─────────────────────────── */
+// Player and Coach are separate logins, matching the web portal (login.html vs
+// coach-login.html). The tab picks which account type you're signing in as, and
+// `signIn` enforces it: a coach's credentials on the Player tab are rejected
+// with a message telling them to switch, rather than silently logging them into
+// the wrong side of the app.
 function LoginView({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const [role, setRole] = useState<Role>('player');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -400,7 +407,7 @@ function LoginView({ onBack }: { onBack: () => void }) {
   async function submit() {
     setErr('');
     setBusy(true);
-    const res = await signInAny(email, password);
+    const res = await signIn(email, password, role);
     setBusy(false);
     if (!res.ok) return setErr(res.error);
     if (res.role === 'coach') router.replace(res.verified ? '/scout' : '/coach-pending');
@@ -421,7 +428,19 @@ function LoginView({ onBack }: { onBack: () => void }) {
           <Animated.View entering={FadeIn.duration(300)}>
             <Image source={logo} style={[styles.logo, { alignSelf: 'center', marginBottom: 16 }]} />
             <Text style={[styles.bigQ, { textAlign: 'center' }]}>Welcome back</Text>
-            <Text style={[styles.sub, { textAlign: 'center', marginBottom: 24 }]}>Log in to your account.</Text>
+            <Text style={[styles.sub, { textAlign: 'center' }]}>Log in to your account.</Text>
+
+            {/* Clearing the error on switch stops a stale "that's a coach
+                account" warning from sitting under the tab that fixes it. */}
+            <RoleSwitch
+              role={role}
+              onChange={(r) => {
+                setRole(r);
+                setErr('');
+              }}
+            />
+            <View style={{ height: 24 }} />
+
             <Field label="Email"><TextField placeholder="you@email.com" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" /></Field>
             <Field label="Password" last><PasswordField placeholder="Your password" value={password} onChangeText={setPassword} /></Field>
             <Pressable style={styles.forgotWrap} onPress={() => onForgot(email)}>
@@ -429,7 +448,7 @@ function LoginView({ onBack }: { onBack: () => void }) {
             </Pressable>
             <ErrorMsg>{err}</ErrorMsg>
             <View style={{ height: 8 }} />
-            <GradientButton label="Log In" onPress={submit} loading={busy} />
+            <GradientButton label={role === 'coach' ? 'Log In as Coach' : 'Log In as Player'} onPress={submit} loading={busy} />
           </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
