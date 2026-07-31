@@ -49,13 +49,6 @@
       "expo-splash-screen",
       "expo-updates",
       [
-        "expo-notifications",
-        {
-          "icon": "./assets/icon.png",
-          "color": "#1E90FF"
-        }
-      ],
-      [
         "expo-image-picker",
         {
           "photosPermission": "EyeScout uses your photo library so you can set a profile photo and share your highlights.",

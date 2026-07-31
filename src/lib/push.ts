@@ -6,15 +6,40 @@ import { useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { supabase } from './supabase';
 
-// Push notifications. Apple-side setup is EAS's problem, not ours: EAS manages
-// the APNs auth key automatically on build, and Expo's push service is the only
-// thing this app ever talks to directly — it proxies to APNs (and FCM on
-// Android) so there's no direct Apple API integration in this codebase at all.
+// Push notifications. Expo's push service is the only thing this app talks to
+// directly — it proxies to APNs (and FCM on Android), so there is no direct
+// Apple API integration in this codebase.
 //
-// This is a NATIVE module (expo-notifications has native code + an Info.plist
-// entry via its config plugin in app.json), so it ships in a real build/
-// TestFlight submission — it can't go out as an OTA update like the rest of
-// this week's changes.
+// This is a NATIVE module, so it ships in a real build/TestFlight submission —
+// it can't go out as an OTA update.
+//
+// ⚠️  CURRENTLY INERT ON iOS — READ BEFORE DEBUGGING "push doesn't work".
+//
+// The `expo-notifications` plugin entry was removed from app.json to unblock
+// builds. That plugin is the ONLY thing that writes the `aps-environment`
+// entitlement (verified in expo-notifications/plugin/build/withNotificationsIOS.js),
+// and builds 10 and 11 both failed with:
+//
+//     Provisioning profile "...AppStore..." doesn't include the
+//     Push Notifications capability / the aps-environment entitlement
+//
+// The App ID com.eyescoutsports.mobile does not have Push Notifications
+// enabled, so no valid profile can carry that entitlement. Everything below
+// still compiles and runs; getExpoPushTokenAsync() just throws without the
+// entitlement and the catch swallows it, so no token is ever saved and nothing
+// is ever delivered.
+//
+// TO TURN IT BACK ON (both steps, in order):
+//   1. developer.apple.com → Certificates, IDs & Profiles → Identifiers →
+//      com.eyescoutsports.mobile → tick "Push Notifications" → Save.
+//      This invalidates the current provisioning profile, which is what makes
+//      EAS regenerate a correct one on the next build.
+//   2. Restore the plugin entry in app.json's "plugins" array:
+//        ["expo-notifications", { "icon": "./assets/icon.png", "color": "#1E90FF" }]
+//      then rebuild. No code in this file needs to change.
+//
+// The server half (006_push_notifications.sql) is already live and will start
+// delivering the moment real tokens land in push_tokens.
 
 // Notifications that arrive while the app is OPEN still show a banner + sound —
 // without this, foreground pushes are silently swallowed, which reads as "push
