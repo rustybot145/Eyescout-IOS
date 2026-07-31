@@ -9,6 +9,7 @@ import { fonts } from '../theme/fonts';
 import { GradientText } from './GradientText';
 import { HypeStar, PulsingHypeStar } from './HypeStar';
 import { hapticSelect, hapticTap } from '../lib/haptics';
+import { toast } from './Overlays';
 import { StoryVideo } from './video';
 import { FeedPost } from '../data/feed';
 import {
@@ -92,12 +93,14 @@ function buildStoryGroups(
   retired: Set<string>
 ): StoryGroup[] {
   const withMedia = posts.filter((p) => p.mediaData);
-  if (!withMedia.length) return [];
-
   // Most Hyped is picked BEFORE every filter below — not the 24h cut, and not
   // the retired-on-refresh cut. It is the one ring that must never leave the
   // row: this week's winner is usually older than a day, and watching it
   // shouldn't make it vanish. It only ever greys out.
+  //
+  // Note there is no early return for "no media" any more. The row renders the
+  // Most Hyped ring unconditionally, even with nothing behind it, matching the
+  // web's rule that the story row should never go completely empty.
   const top = pickMostHyped(withMedia, winners);
 
   // Player rings expire after 24 hours, like every other story product...
@@ -139,20 +142,19 @@ function buildStoryGroups(
     return lb.localeCompare(la);
   });
 
-  const out: StoryGroup[] = [];
-  if (top) {
-    const t: FeedPost = top;
-    out.push({
-      key: 'mostHyped',
-      kind: 'mostHyped',
-      label: 'Most Hyped',
-      avatarPhoto: t.authorPhoto,
-      avatarName: t.authorName,
-      avatarJersey: t.authorJersey,
-      posts: [toStory(t)],
-    });
-  }
-  return [...out, ...groups.slice(0, 15)];
+  // Always present, winner or not. An empty ring (posts: []) renders muted and
+  // says so when tapped, rather than vanishing — a missing row reads as "the
+  // app is broken", which is exactly how this looked before.
+  const mostHyped: StoryGroup = {
+    key: 'mostHyped',
+    kind: 'mostHyped',
+    label: 'Most Hyped',
+    avatarPhoto: top?.authorPhoto ?? null,
+    avatarName: top?.authorName ?? '',
+    avatarJersey: top?.authorJersey ?? '',
+    posts: top ? [toStory(top)] : [],
+  };
+  return [mostHyped, ...groups.slice(0, 15)];
 }
 
 export function Stories({ posts }: { posts: FeedPost[] }) {
@@ -196,8 +198,6 @@ export function Stories({ posts }: { posts: FeedPost[] }) {
     if (seenRef.current.size) setRetired(new Set(seenRef.current));
   }, [posts]);
 
-  if (!groups.length) return null;
-
   const markSeen = (ids: string[]) =>
     setSeen((prev) => {
       const next = new Set(prev);
@@ -215,6 +215,13 @@ export function Stories({ posts }: { posts: FeedPost[] }) {
               key={g.key}
               style={styles.item}
               onPress={() => {
+                // The Most Hyped ring can legitimately have nothing behind it
+                // (nobody hyped anything yet this week). Opening the viewer on
+                // an empty group would index into posts[0] of an empty array.
+                if (!g.posts.length) {
+                  toast('No hyped post yet this week — go hype somebody!');
+                  return;
+                }
                 hapticTap();
                 setOpenIdx(i);
               }}

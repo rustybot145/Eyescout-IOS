@@ -12,8 +12,15 @@ import * as Haptics from 'expo-haptics';
 // Every call is best-effort. Older Androids and any device with system haptics
 // disabled will reject these; a failed buzz must never surface as an error.
 
+// try/catch AND .catch(): expo-haptics throws SYNCHRONOUSLY when the native
+// module isn't present (an older build that predates the package, for
+// instance), which a lone .catch() would let escape into the press handler.
 const safe = (fn: () => Promise<void>) => {
-  fn().catch(() => {});
+  try {
+    fn().catch(() => {});
+  } catch {
+    /* no haptics on this device/build — never a user-visible failure */
+  }
 };
 
 // The big one: hyping a post. Medium (not Light) so it reads as a real,
