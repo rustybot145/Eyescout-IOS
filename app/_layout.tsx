@@ -10,11 +10,13 @@ import { OverlayHost } from '../src/components/Overlays';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { supabase } from '../src/lib/supabase';
 import { configurePurchases } from '../src/lib/iap';
+import { registerForPushNotifications, unregisterPushToken, useNotificationRouting } from '../src/lib/push';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useAppFonts();
+  useNotificationRouting();
 
   useEffect(() => {
     if (fontsLoaded || fontError) SplashScreen.hideAsync().catch(() => {});
@@ -26,6 +28,27 @@ export default function RootLayout() {
   useEffect(() => {
     const apply = (userId?: string) => {
       if (userId) configurePurchases(userId).catch(() => {});
+    };
+    supabase.auth.getSession().then(({ data }) => apply(data.session?.user?.id));
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) =>
+      apply(session?.user?.id)
+    );
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  // Register this device's push token whenever a user is signed in, and drop it
+  // the moment they sign out — a ref (not state) tracks the previous uid since
+  // onAuthStateChange only hands back the NEW session, never the one that just
+  // ended, and unregistering needs to know who to unregister.
+  useEffect(() => {
+    let lastUid: string | undefined;
+    const apply = (userId?: string) => {
+      if (userId) {
+        registerForPushNotifications(userId).catch(() => {});
+      } else if (lastUid) {
+        unregisterPushToken(lastUid).catch(() => {});
+      }
+      lastUid = userId;
     };
     supabase.auth.getSession().then(({ data }) => apply(data.session?.user?.id));
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) =>
