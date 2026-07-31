@@ -4,7 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { fonts } from '../theme/fonts';
 import { Avatar } from './Avatar';
-import { HypeStar } from './HypeStar';
+import { PoppingHypeStar } from './HypeStar';
+import { hapticHype, hapticTap } from '../lib/haptics';
 import { FeedVideo } from './video';
 import { FeedPost } from '../data/feed';
 import { timeAgo, formatCount } from '../lib/format';
@@ -86,17 +87,29 @@ export const PostCard = React.memo(function PostCard({
         </View>
       )}
 
-      {/* Actions */}
+      {/* Actions — hype on the left, share pushed to the right edge */}
       <View style={styles.actions}>
-        <Pressable onPress={() => onHype(post)} style={styles.hypeBtn} hitSlop={6}>
-          <HypeStar size={22} color={post.hyped ? '#a855f7' : colors.muted} />
+        <Pressable
+          onPress={() => {
+            // Buzz on the way IN only. Un-hyping is a correction, not an
+            // achievement, and buzzing both ways makes a mis-tap feel doubly loud.
+            if (!post.hyped) hapticHype();
+            onHype(post);
+          }}
+          style={styles.hypeBtn}
+          hitSlop={6}
+        >
+          <PoppingHypeStar size={22} color={post.hyped ? '#a855f7' : colors.muted} popKey={post.hyped} />
           <Text style={[styles.hypeCount, post.hyped && styles.hypeCountOn]}>
             {formatCount(post.hypeCount)}
           </Text>
         </Pressable>
         {onShare ? (
           <Pressable
-            onPress={() => onShare(post)}
+            onPress={() => {
+              hapticTap();
+              onShare(post);
+            }}
             style={styles.shareBtn}
             hitSlop={6}
             accessibilityRole="button"
@@ -153,9 +166,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  actions: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingTop: 12, paddingBottom: 4, gap: 20 },
+  actions: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingTop: 12, paddingBottom: 4 },
   hypeBtn: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  shareBtn: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  // marginLeft:auto pins share to the right edge of the row, opposite hype.
+  shareBtn: { flexDirection: 'row', alignItems: 'center', gap: 7, marginLeft: 'auto' },
   shareText: { color: colors.muted, fontSize: 14, fontWeight: '700' },
   hypeCount: { color: colors.muted, fontSize: 14, fontWeight: '700' },
   hypeCountOn: { color: '#a855f7' },

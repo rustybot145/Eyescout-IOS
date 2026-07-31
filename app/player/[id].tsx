@@ -22,6 +22,7 @@ import { getCurrentCoach, Coach, fetchSavedPlayerIds, toggleSavePlayer } from '.
 import { sendCoachMessage } from '../../src/data/messages';
 import { blockUser } from '../../src/data/blocks';
 import { getCurrentUser } from '../../src/data/user';
+import { hapticTap, hapticSuccess, hapticError, hapticWarn } from '../../src/lib/haptics';
 
 // A player's profile as seen by SOMEONE ELSE — this is what opens when a coach
 // taps a card on the Scout screen. Before this existed, tapping a player showed
@@ -106,6 +107,7 @@ export default function PlayerProfileScreen() {
   function onToggleFollow() {
     if (!viewerId || !id) return;
     const next = !following;
+    hapticTap();
     setFollowing(next); // optimistic — the write is fire-and-forget, like the feed
     toggleFollow(viewerId, id, next);
     // Keep the follower count honest without a full refetch.
@@ -115,6 +117,7 @@ export default function PlayerProfileScreen() {
   function onToggleSave() {
     if (!coach || !id) return;
     const next = !saved;
+    hapticTap();
     setSaved(next);
     toggleSavePlayer(coach.id, id, next);
     toast(next ? 'Added to your recruit list' : 'Removed from your recruit list');
@@ -124,6 +127,8 @@ export default function PlayerProfileScreen() {
     if (!coach || !id) return;
     const { error } = await sendCoachMessage(coach, id, text);
     setComposing(false);
+    if (error) hapticError();
+    else hapticSuccess();
     toast(error ? 'Could not send' : `Message sent to ${data?.player.athleteFirst || 'player'}`, error ? 'err' : 'ok');
   }
 
@@ -140,6 +145,7 @@ export default function PlayerProfileScreen() {
     if (!ok) return;
     try {
       await blockUser(viewerId, id);
+      hapticWarn();
       toast('Blocked');
       router.back();
     } catch {

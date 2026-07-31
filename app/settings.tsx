@@ -18,6 +18,7 @@ import { getCurrentUserId } from '../src/data/user';
 import { pickMedia } from '../src/lib/pickImage';
 import { uploadToBucket } from '../src/data/media';
 import { toast } from '../src/components/Overlays';
+import { hapticSuccess, hapticError } from '../src/lib/haptics';
 import { deleteAccountFlow } from '../src/lib/account';
 import { openTerms, openPrivacy, openSupport } from '../src/lib/legal';
 import { getSubscription } from '../src/data/subscription';
@@ -58,8 +59,10 @@ export default function SettingsScreen() {
       const { error } = await updateProfile(uid, { profile_photo: url });
       if (error) throw new Error(error.message);
       set('profilePhoto', url);
+      hapticSuccess();
       toast('Profile photo updated');
     } catch (err: any) {
+      hapticError();
       toast(err?.message || 'Upload failed', 'err');
     } finally {
       setPhotoBusy(false);
@@ -86,8 +89,13 @@ export default function SettingsScreen() {
     };
     const { error } = await updateProfile(uid, patch);
     setSaving(false);
-    if (error) toast(error.message || 'Could not save', 'err');
-    else toast('Your profile has been updated');
+    if (error) {
+      hapticError();
+      toast(error.message || 'Could not save', 'err');
+    } else {
+      hapticSuccess();
+      toast('Your profile has been updated');
+    }
   }
 
   async function signOut() {

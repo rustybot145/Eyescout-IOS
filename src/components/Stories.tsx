@@ -7,7 +7,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { colors, gradient } from '../theme/colors';
 import { fonts } from '../theme/fonts';
 import { GradientText } from './GradientText';
-import { HypeStar } from './HypeStar';
+import { HypeStar, PulsingHypeStar } from './HypeStar';
+import { hapticSelect, hapticTap } from '../lib/haptics';
 import { StoryVideo } from './video';
 import { FeedPost } from '../data/feed';
 import {
@@ -85,18 +86,31 @@ function pickMostHyped(media: FeedPost[], winners: WeeklyWinner[] | null): FeedP
 // Build the story row: a leading "Most Hyped" ring, then one ring per athlete
 // who posted media IN THE LAST 24 HOURS, most recent first — the same two
 // clocks the web portal runs on (see src/data/stories.ts).
-function buildStoryGroups(posts: FeedPost[], winners: WeeklyWinner[] | null): StoryGroup[] {
+function buildStoryGroups(
+  posts: FeedPost[],
+  winners: WeeklyWinner[] | null,
+  retired: Set<string>
+): StoryGroup[] {
   const withMedia = posts.filter((p) => p.mediaData);
   if (!withMedia.length) return [];
 
-  // Most Hyped is picked BEFORE the 24h cut: this week's winner is very often
-  // older than a day, and expiring it after 24h would empty the ring for most
-  // of every week.
+  // Most Hyped is picked BEFORE every filter below — not the 24h cut, and not
+  // the retired-on-refresh cut. It is the one ring that must never leave the
+  // row: this week's winner is usually older than a day, and watching it
+  // shouldn't make it vanish. It only ever greys out.
   const top = pickMostHyped(withMedia, winners);
 
-  // Player rings expire after 24 hours, like every other story product.
+  // Player rings expire after 24 hours, like every other story product...
   const cutoff = Date.now() - STORY_WINDOW_MS;
-  const fresh = withMedia.filter((p) => new Date(p.createdAt).getTime() >= cutoff);
+  const fresh = withMedia.filter(
+    (p) =>
+      new Date(p.createdAt).getTime() >= cutoff &&
+      // ...and additionally drop the ones already watched BEFORE this refresh.
+      // Watching greys a ring immediately but leaves it in place (so the row
+      // doesn't rearrange under your thumb mid-scroll); the next refresh is
+      // what actually clears it.
+      !retired.has(p.id)
+  );
 
   // Group by author, each group's posts oldest→newest for viewing order.
   const map = new Map<string, StoryGroup>();
@@ -143,9 +157,17 @@ function buildStoryGroups(posts: FeedPost[], winners: WeeklyWinner[] | null): St
 
 export function Stories({ posts }: { posts: FeedPost[] }) {
   const [winners, setWinners] = useState<WeeklyWinner[] | null>(null);
-  const groups = useMemo(() => buildStoryGroups(posts, winners), [posts, winners]);
   const [seen, setSeen] = useState<Set<string>>(new Set());
+  // Watched stories from BEFORE the most recent refresh. Kept separate from
+  // `seen` so watching greys a ring now and removes it later, rather than
+  // yanking it out from under the user the instant the viewer closes.
+  const [retired, setRetired] = useState<Set<string>>(new Set());
   const [openIdx, setOpenIdx] = useState<number | null>(null);
+
+  const groups = useMemo(
+    () => buildStoryGroups(posts, winners, retired),
+    [posts, winners, retired]
+  );
 
   // Fetched once per mount. The answer only changes on Mondays, so there is
   // nothing to gain from re-checking it as the feed refreshes.
@@ -158,6 +180,21 @@ export function Stories({ posts }: { posts: FeedPost[] }) {
       alive = false;
     };
   }, []);
+
+  // A new `posts` array means the feed refetched — that's the moment everything
+  // watched so far graduates from "greyed out" to "gone". Reading `seen` from a
+  // ref keeps this effect keyed on posts alone, so marking something seen can't
+  // retire it early.
+  const seenRef = useRef(seen);
+  seenRef.current = seen;
+  const firstPosts = useRef(true);
+  useEffect(() => {
+    if (firstPosts.current) {
+      firstPosts.current = false; // initial load isn't a refresh
+      return;
+    }
+    if (seenRef.current.size) setRetired(new Set(seenRef.current));
+  }, [posts]);
 
   if (!groups.length) return null;
 
@@ -174,7 +211,14 @@ export function Stories({ posts }: { posts: FeedPost[] }) {
         {groups.map((g, i) => {
           const allSeen = g.posts.every((p) => seen.has(p.id));
           return (
-            <Pressable key={g.key} style={styles.item} onPress={() => setOpenIdx(i)}>
+            <Pressable
+              key={g.key}
+              style={styles.item}
+              onPress={() => {
+                hapticTap();
+                setOpenIdx(i);
+              }}
+            >
               <StoryRing group={g} seen={allSeen} />
               <Text style={styles.label} numberOfLines={1}>
                 {g.kind === 'mostHyped' ? 'Most Hyped' : g.label}
@@ -200,7 +244,13 @@ function StoryRing({ group, seen }: { group: StoryGroup; seen: boolean }) {
   const inner = (
     <View style={styles.ringInner}>
       {group.kind === 'mostHyped' ? (
-        <HypeStar size={26} color="#c084fc" />
+        // Once watched it stops pulsing and goes grey — the ring stays in the
+        // row regardless, it just stops advertising itself.
+        seen ? (
+          <HypeStar size={26} color="rgba(255,255,255,0.35)" />
+        ) : (
+          <PulsingHypeStar size={26} color="#c084fc" />
+        )
       ) : group.avatarPhoto ? (
         <Image source={{ uri: group.avatarPhoto }} style={styles.avatarImg} />
       ) : group.avatarJersey ? (
@@ -212,6 +262,7 @@ function StoryRing({ group, seen }: { group: StoryGroup; seen: boolean }) {
   );
 
   if (group.kind === 'mostHyped') {
+    if (seen) return <View style={[styles.ring, styles.ringSeen]}>{inner}</View>;
     return (
       <LinearGradient colors={['#4c0080', '#7B2FBE', '#a855f7']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.ring}>
         {inner}
@@ -248,8 +299,11 @@ function StoryViewer({
   const post = group?.posts[ii];
 
   // Advance helpers
+  // A soft tick on each advance — this is a rapid, repeated action, so it uses
+  // the lightest feedback available rather than the hype buzz.
   const goNext = () => {
     if (!group) return onClose();
+    hapticSelect();
     if (ii < group.posts.length - 1) setIi(ii + 1);
     else if (gi < groups.length - 1) {
       setGi(gi + 1);
@@ -257,6 +311,7 @@ function StoryViewer({
     } else onClose();
   };
   const goPrev = () => {
+    hapticSelect();
     if (ii > 0) setIi(ii - 1);
     else if (gi > 0) {
       const prev = groups[gi - 1];

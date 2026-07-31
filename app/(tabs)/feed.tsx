@@ -13,6 +13,7 @@ import { Stories } from '../../src/components/Stories';
 import { PaywallCard } from '../../src/components/Paywall';
 import { openReport } from '../../src/components/Overlays';
 import { sharePost } from '../../src/lib/sharePost';
+import { hapticTap } from '../../src/lib/haptics';
 import { FeedPost, fetchFeed, toggleHype, toggleFollow } from '../../src/data/feed';
 import { fetchHasPro, fetchFeedPreview } from '../../src/data/subscription';
 import { getCurrentUser, CurrentUser } from '../../src/data/user';
@@ -92,6 +93,7 @@ export default function FeedScreen() {
     (p: FeedPost) => {
       if (!me) return;
       const nowFollowing = !p.following;
+      hapticTap();
       setPosts((prev) => prev.map((x) => (x.authorId === p.authorId ? { ...x, following: nowFollowing } : x)));
       toggleFollow(me.id, p.authorId, nowFollowing);
     },

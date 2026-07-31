@@ -11,6 +11,7 @@ import { Stories } from '../../src/components/Stories';
 import { PaywallCard } from '../../src/components/Paywall';
 import { openReport } from '../../src/components/Overlays';
 import { sharePost } from '../../src/lib/sharePost';
+import { hapticTap } from '../../src/lib/haptics';
 import { FeedPost, fetchFeed, toggleHype, toggleFollow } from '../../src/data/feed';
 import { fetchHasPro, fetchFeedPreview } from '../../src/data/subscription';
 import { getCurrentCoach, Coach } from '../../src/data/coach';
@@ -88,6 +89,7 @@ export default function CoachNewsScreen() {
     (p: FeedPost) => {
       if (!coach) return;
       const nowFollowing = !p.following;
+      hapticTap();
       setPosts((prev) => prev.map((x) => (x.authorId === p.authorId ? { ...x, following: nowFollowing } : x)));
       toggleFollow(coach.id, p.authorId, nowFollowing);
     },

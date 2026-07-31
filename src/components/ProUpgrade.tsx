@@ -8,6 +8,7 @@ import { fonts } from '../theme/fonts';
 import { GradientButton } from './GradientButton';
 import { fetchHasPro } from '../data/subscription';
 import { purchasePro, restorePro } from '../lib/iap';
+import { hapticSuccess } from '../lib/haptics';
 import { toast } from './Overlays';
 
 type Role = 'player' | 'coach';
@@ -26,7 +27,10 @@ export function useProUpgrade(role: Role) {
     setBusy(true);
     const result = await purchasePro();
     setBusy(false);
-    if (result === 'success' && (await fetchHasPro())) setCelebrating(true);
+    if (result === 'success' && (await fetchHasPro())) {
+      hapticSuccess(); // the unlock reveal deserves the one big confirmation buzz
+      setCelebrating(true);
+    }
   }, []);
 
   // Apple requires a Restore Purchases path on every subscription paywall.
@@ -34,8 +38,10 @@ export function useProUpgrade(role: Role) {
     setBusy(true);
     const result = await restorePro();
     setBusy(false);
-    if (result === 'success' && (await fetchHasPro())) setCelebrating(true);
-    else if (result !== 'unavailable') toast('No active subscription found to restore', 'err');
+    if (result === 'success' && (await fetchHasPro())) {
+      hapticSuccess();
+      setCelebrating(true);
+    } else if (result !== 'unavailable') toast('No active subscription found to restore', 'err');
   }, []);
 
   const finish = useCallback(() => {

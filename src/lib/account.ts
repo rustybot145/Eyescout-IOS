@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { confirm, toast } from '../components/Overlays';
+import { hapticError, hapticWarn } from './haptics';
 
 // Account deletion — App Store guideline 5.1.1(v). Shared by the player Settings
 // screen and the coach Settings screen so both roles behave identically and
@@ -38,12 +39,14 @@ export async function deleteAccountFlow(): Promise<boolean> {
 
   const { error } = await supabase.rpc('delete_my_account');
   if (error) {
+    hapticError();
     toast(deleteErrorMessage(error), 'err');
     // Surfaced in dev/EAS logs so a support ticket has something to go on.
     console.warn('[delete_my_account]', error.code, error.message);
     return false;
   }
 
+  hapticWarn();
   toast('Your account has been deleted');
   return true;
 }

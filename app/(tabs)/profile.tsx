@@ -19,6 +19,7 @@ import {
 } from '../../src/data/media';
 import { toast } from '../../src/components/Overlays';
 import { useProAccess } from '../../src/lib/useProAccess';
+import { hapticSuccess, hapticError } from '../../src/lib/haptics';
 import { supabase } from '../../src/lib/supabase';
 
 // A grid item plus where it lives, so the owner can delete the right thing.
@@ -113,8 +114,10 @@ export default function ProfileScreen() {
       }
       await addOwnMedia(data.player.id, uploaded);
       await load();
+      hapticSuccess();
       toast(`Added ${uploaded.length} ${uploaded.length === 1 ? 'item' : 'items'} to your content`);
     } catch (err: any) {
+      hapticError();
       toast(err?.message || 'Upload failed', 'err');
     } finally {
       setUploading(false);
