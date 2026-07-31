@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, FlatList, StyleSheet, Pressable, TextInput, RefreshControl,
+  View, Text, Image, FlatList, StyleSheet, Pressable, TextInput, RefreshControl,
   ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,6 +13,8 @@ import { Thread, ChatMsg, fetchThreads, saveThread, deleteThread } from '../../s
 import { getCurrentUserId } from '../../src/data/user';
 import { confirm, openReport } from '../../src/components/Overlays';
 import { timeAgo, formatTime, formatDate } from '../../src/lib/format';
+
+const BRAND_LOGO = require('../../assets/brand/logo.png');
 
 export default function MessagesScreen() {
   const insets = useSafeAreaInsets();
@@ -157,16 +159,35 @@ export default function MessagesScreen() {
   );
 }
 
+// Messages sent from the admin panel come through as a thread with NO coach_id
+// (see eyescout-admin/index.html, which writes coachId: null / coachName:
+// 'EyeScout Team'). Every real coach thread always carries an id, so a missing
+// one is the reliable signal that this is the official account rather than a
+// person — the same test fetchThreads() already uses to keep the thread
+// unblockable.
+const isAdminThread = (t: Thread) => !t.coachId;
+
+// The official account shows the EyeScout mark instead of an "E" initial.
+function ThreadAvatar({ thread, size }: { thread: Thread; size: number }) {
+  if (!isAdminThread(thread)) return <Avatar name={thread.coachName} size={size} />;
+  return (
+    <View style={[styles.brandAvatar, { width: size, height: size, borderRadius: size / 2 }]}>
+      <Image source={BRAND_LOGO} style={{ width: size * 0.72, height: size * 0.72 }} resizeMode="contain" />
+    </View>
+  );
+}
+
 function ConvoRow({ t, onPress }: { t: Thread; onPress: () => void }) {
   const last = t.messages[t.messages.length - 1];
   const preview = last ? last.text : 'No messages yet';
   const unread = t.messages.some((m) => m.from === 'coach' && !m.read);
+  const admin = isAdminThread(t);
   return (
     <Pressable style={styles.convo} onPress={onPress}>
       <View style={styles.convoAvatar}>
-        <Avatar name={t.coachName} size={48} />
+        <ThreadAvatar thread={t} size={48} />
         <View style={styles.coachBadge}>
-          <Text style={styles.coachBadgeText}>C</Text>
+          <Text style={styles.coachBadgeText}>{admin ? 'A' : 'C'}</Text>
         </View>
       </View>
       <View style={styles.convoInfo}>
@@ -229,13 +250,13 @@ function ChatView({
         <Pressable onPress={onBack} hitSlop={8} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={colors.white} />
         </Pressable>
-        <Avatar name={thread.coachName} size={38} />
+        <ThreadAvatar thread={thread} size={38} />
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.chatName} numberOfLines={1}>
             {thread.coachName || 'Coach'}
           </Text>
           <Text style={styles.chatRole} numberOfLines={1}>
-            Coach · {thread.coachSchool || 'EyeScout Sports'}
+            {isAdminThread(thread) ? 'Admin' : `Coach · ${thread.coachSchool || 'EyeScout Sports'}`}
           </Text>
         </View>
         <Pressable onPress={onReport} hitSlop={8} style={styles.trashBtn}>
@@ -322,6 +343,10 @@ const styles = StyleSheet.create({
     borderWidth: 2, borderColor: colors.bg,
   },
   coachBadgeText: { color: '#fff', fontSize: 9, fontWeight: '800' },
+  // Lighter disc than Avatar's near-black so the logo mark stays legible.
+  brandAvatar: {
+    backgroundColor: '#1e1e1e', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+  },
   convoInfo: { flex: 1, minWidth: 0 },
   convoName: { color: colors.white, fontSize: 15, fontWeight: '700' },
   convoPreview: { color: colors.muted, fontSize: 13, marginTop: 3 },
