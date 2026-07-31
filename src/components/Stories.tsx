@@ -10,6 +10,9 @@ import { GradientText } from './GradientText';
 import { HypeStar } from './HypeStar';
 import { StoryVideo } from './video';
 import { FeedPost } from '../data/feed';
+import {
+  fetchWeeklyHypeWinners, currentWeekStart, STORY_WINDOW_MS, WeeklyWinner,
+} from '../data/stories';
 import { timeAgo } from '../lib/format';
 
 const { width, height } = Dimensions.get('window');
@@ -37,34 +40,67 @@ type StoryGroup = {
   posts: StoryPost[];
 };
 
-// Build story groups from the same feed posts we already fetched — a leading
-// "Most Hyped" ring (top-hyped post in your sport) plus one ring per athlete
-// who has posted media, newest first. Mirrors the web's story row.
-function buildStoryGroups(posts: FeedPost[]): StoryGroup[] {
-  const media = posts.filter((p) => p.mediaData);
-  if (!media.length) return [];
+const toStory = (p: FeedPost): StoryPost => ({
+  id: p.id,
+  authorId: p.authorId,
+  authorName: p.authorName,
+  authorJersey: p.authorJersey,
+  authorPhoto: p.authorPhoto,
+  type: p.type,
+  mediaData: p.mediaData,
+  caption: p.caption,
+  createdAt: p.createdAt,
+});
 
-  const toStory = (p: FeedPost): StoryPost => ({
-    id: p.id,
-    authorId: p.authorId,
-    authorName: p.authorName,
-    authorJersey: p.authorJersey,
-    authorPhoto: p.authorPhoto,
-    type: p.type,
-    mediaData: p.mediaData,
-    caption: p.caption,
-    createdAt: p.createdAt,
-  });
+// Which post leads the row as "Most Hyped".
+//
+// The winner is FROZEN FOR THE WEEK, not recomputed on every render — that was
+// the old behaviour here, and it meant the ring could change several times a
+// day as hype trickled in. get_weekly_hype_winners() locks one post in every
+// Monday 12:00 AM Phoenix and holds it until the next Monday.
+//
+// If that RPC isn't deployed, we fall back to the best-hyped post created since
+// this week's Monday. That's an approximation of the frozen winner (it can still
+// move mid-week, and it can't see hype earned this week by an older post), but
+// it keeps the ring on the right weekly cycle instead of an all-time one.
+function pickMostHyped(media: FeedPost[], winners: WeeklyWinner[] | null): FeedPost | null {
+  const globalWinnerId = winners?.find((w) => w.category === 'global')?.postId;
+  if (globalWinnerId) {
+    const won = media.find((p) => p.id === globalWinnerId);
+    if (won) return won;
+    // Winner exists but isn't in this feed page (other sport, or scrolled past
+    // the fetch limit) — fall through rather than showing an empty ring.
+  }
 
-  // Most Hyped — the single highest-hype post (only if it has any hype).
+  const weekStart = currentWeekStart().getTime();
   let top: FeedPost | null = null;
-  media.forEach((p) => {
-    if (p.hypeCount > 0 && (!top || p.hypeCount > top.hypeCount)) top = p;
-  });
+  for (const p of media) {
+    if (p.hypeCount <= 0) continue;
+    if (new Date(p.createdAt).getTime() < weekStart) continue;
+    if (!top || p.hypeCount > top.hypeCount) top = p;
+  }
+  return top;
+}
 
-  // Group the rest by author, each group's posts oldest→newest for viewing order.
+// Build the story row: a leading "Most Hyped" ring, then one ring per athlete
+// who posted media IN THE LAST 24 HOURS, most recent first — the same two
+// clocks the web portal runs on (see src/data/stories.ts).
+function buildStoryGroups(posts: FeedPost[], winners: WeeklyWinner[] | null): StoryGroup[] {
+  const withMedia = posts.filter((p) => p.mediaData);
+  if (!withMedia.length) return [];
+
+  // Most Hyped is picked BEFORE the 24h cut: this week's winner is very often
+  // older than a day, and expiring it after 24h would empty the ring for most
+  // of every week.
+  const top = pickMostHyped(withMedia, winners);
+
+  // Player rings expire after 24 hours, like every other story product.
+  const cutoff = Date.now() - STORY_WINDOW_MS;
+  const fresh = withMedia.filter((p) => new Date(p.createdAt).getTime() >= cutoff);
+
+  // Group by author, each group's posts oldest→newest for viewing order.
   const map = new Map<string, StoryGroup>();
-  media.forEach((p) => {
+  fresh.forEach((p) => {
     let g = map.get(p.authorId);
     if (!g) {
       g = {
@@ -106,9 +142,22 @@ function buildStoryGroups(posts: FeedPost[]): StoryGroup[] {
 }
 
 export function Stories({ posts }: { posts: FeedPost[] }) {
-  const groups = useMemo(() => buildStoryGroups(posts), [posts]);
+  const [winners, setWinners] = useState<WeeklyWinner[] | null>(null);
+  const groups = useMemo(() => buildStoryGroups(posts, winners), [posts, winners]);
   const [seen, setSeen] = useState<Set<string>>(new Set());
   const [openIdx, setOpenIdx] = useState<number | null>(null);
+
+  // Fetched once per mount. The answer only changes on Mondays, so there is
+  // nothing to gain from re-checking it as the feed refreshes.
+  useEffect(() => {
+    let alive = true;
+    fetchWeeklyHypeWinners().then((w) => {
+      if (alive) setWinners(w);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   if (!groups.length) return null;
 
