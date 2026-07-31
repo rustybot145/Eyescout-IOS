@@ -29,7 +29,7 @@ import { Orbs } from './Orbs';
 import { GradientButton } from './GradientButton';
 import { Select } from './Select';
 import { TextField, PasswordField, FieldLabel, ErrorMsg } from './fields';
-import { SPORTS, COACH_SPORTS, GRAD_YEARS, DIVISIONS, TITLES } from '../theme/options';
+import { SPORTS, COACH_SPORTS, GRAD_YEARS, DIVISIONS, TITLES, BIRTH_MONTHS, BIRTH_DAYS, BIRTH_YEARS } from '../theme/options';
 import { signUpPlayer, signUpCoach, signInAny, forgotPassword } from '../lib/auth';
 import { toast } from './Overlays';
 
@@ -40,13 +40,29 @@ type Role = 'player' | 'coach';
 
 const emptyPlayer = {
   athlete_first: '', athlete_last: '', email: '', phone: '', school: '', sport: '', jersey_number: '',
-  grad_year: '', parent_first: '', parent_last: '', parent_email: '', parent_phone: '', zip: '',
+  grad_year: '', birth_month: '', birth_day: '', birth_year: '',
+  parent_first: '', parent_last: '', parent_email: '', parent_phone: '', zip: '',
   password: '', confirm: '',
 };
 const emptyCoach = { first: '', last: '', university: '', division: '', sport: '', title: '', email: '', password: '', confirm: '' };
 
-const PLAYER_STEPS = 6;
+const PLAYER_STEPS = 7;
 const COACH_STEPS = 5;
+const MIN_AGE = 13; // Apple/COPPA — below this, EyeScout requires a parent-operated signup, not self-serve.
+
+// null = incomplete date. Age is computed against real time, not just year
+// arithmetic, so someone whose birthday is later this year is still counted
+// at their current (younger) age.
+function computeAge(year: string, month: string, day: string): number | null {
+  if (!year || !month || !day) return null;
+  const dob = new Date(Number(year), Number(month) - 1, Number(day));
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const hadBirthdayThisYear =
+    today.getMonth() > dob.getMonth() || (today.getMonth() === dob.getMonth() && today.getDate() >= dob.getDate());
+  if (!hadBirthdayThisYear) age -= 1;
+  return age;
+}
 
 export function SignupQuiz() {
   const insets = useSafeAreaInsets();
@@ -61,7 +77,6 @@ export function SignupQuiz() {
 
   const [pf, setPf] = useState(emptyPlayer);
   const [cf, setCf] = useState(emptyCoach);
-  const [ageOk, setAgeOk] = useState(false);
   const setP = (k: keyof typeof pf) => (v: string) => setPf((p) => ({ ...p, [k]: v }));
   const setC = (k: keyof typeof cf) => (v: string) => setCf((p) => ({ ...p, [k]: v }));
 
@@ -99,16 +114,21 @@ export function SignupQuiz() {
     if (role === 'player') {
       switch (step) {
         case 0: return pf.athlete_first.trim() && pf.athlete_last.trim() ? '' : 'Please enter your first and last name.';
-        case 1: return !isEmail(pf.email) ? 'Please enter a valid email.' : !pf.phone.trim() ? 'Please enter your phone number.' : '';
-        case 2: return pf.school.trim() && pf.sport ? '' : 'Please add your school and sport.';
-        case 3: return pf.jersey_number.trim() && pf.grad_year ? '' : 'Please add your jersey number and graduation year.';
-        case 4:
+        case 1: {
+          const age = computeAge(pf.birth_year, pf.birth_month, pf.birth_day);
+          if (age === null) return 'Please enter a complete date of birth.';
+          if (age < MIN_AGE) return `EYESCOUT_UNDER_AGE`; // handled specially — see the blocked-age panel below
+          return '';
+        }
+        case 2: return !isEmail(pf.email) ? 'Please enter a valid email.' : !pf.phone.trim() ? 'Please enter your phone number.' : '';
+        case 3: return pf.school.trim() && pf.sport ? '' : 'Please add your school and sport.';
+        case 4: return pf.jersey_number.trim() && pf.grad_year ? '' : 'Please add your jersey number and graduation year.';
+        case 5:
           if (!(pf.parent_first.trim() && pf.parent_last.trim() && pf.parent_phone.trim() && pf.zip.trim())) return 'Please complete the parent/guardian details.';
           return isEmail(pf.parent_email) ? '' : 'Please enter a valid parent email.';
-        case 5:
+        case 6:
           if (pf.password.length < 8) return 'Password must be at least 8 characters.';
-          if (pf.password !== pf.confirm) return 'Passwords do not match.';
-          return ageOk ? '' : 'Please confirm the athlete is 13 or older.';
+          return pf.password === pf.confirm ? '' : 'Passwords do not match.';
       }
     } else {
       switch (step) {
@@ -127,7 +147,9 @@ export function SignupQuiz() {
   async function submit() {
     setBusy(true);
     if (role === 'player') {
-      const res = await signUpPlayer(pf);
+      const { birth_month, birth_day, birth_year, ...rest } = pf;
+      const birth_date = `${birth_year}-${birth_month}-${birth_day}`;
+      const res = await signUpPlayer({ ...rest, birth_date });
       if (!res.ok) { setBusy(false); return setErr(res.error); }
       // Sales funnel: land the brand-new player on the Pro offer (X → profile).
       router.replace({ pathname: '/paywall', params: { role: 'player', from: 'signup' } });
@@ -141,6 +163,10 @@ export function SignupQuiz() {
 
   function next() {
     const e = validateStep();
+    // The under-13 block has its own panel drawn live in the step itself
+    // (see case 1 below) — surfacing the raw sentinel here would show literal
+    // "EYESCOUT_UNDER_AGE" text, and the point is to block silently, not nag.
+    if (e === 'EYESCOUT_UNDER_AGE') return;
     if (e) return setErr(e);
     setErr('');
     dir.current = 1;
@@ -253,28 +279,50 @@ export function SignupQuiz() {
               <Field label="Last Name" last><TextField placeholder="Smith" value={pf.athlete_last} onChangeText={setP('athlete_last')} autoCapitalize="words" /></Field>
             </Step>
           );
-        case 1:
+        case 1: {
+          const age = computeAge(pf.birth_year, pf.birth_month, pf.birth_day);
+          const blocked = age !== null && age < MIN_AGE;
+          return (
+            <Step q="When's your birthday?" s="We ask so parent consent and safety settings match your age.">
+              <Row>
+                <Half><Field label="Month"><Select placeholder="Month" options={BIRTH_MONTHS} value={pf.birth_month} onChange={setP('birth_month')} /></Field></Half>
+                <Half><Field label="Day"><Select placeholder="Day" options={BIRTH_DAYS} value={pf.birth_day} onChange={setP('birth_day')} /></Field></Half>
+              </Row>
+              <Field label="Year" last><Select placeholder="Year" options={BIRTH_YEARS} value={pf.birth_year} onChange={setP('birth_year')} /></Field>
+              {blocked ? (
+                <View style={styles.blockedPanel}>
+                  <Text style={styles.blockedTitle}>A parent needs to help with this one</Text>
+                  <Text style={styles.blockedBody}>
+                    EyeScout requires a parent or guardian to create an account for athletes under 13. Have a parent
+                    reach out to <Text style={styles.blockedStrong}>info@eyescoutsports.com</Text> to get set up.
+                  </Text>
+                </View>
+              ) : null}
+            </Step>
+          );
+        }
+        case 2:
           return (
             <Step q="How can we reach you?" s="We'll use this to keep your account secure.">
               <Field label="Email"><TextField placeholder="tyler@email.com" value={pf.email} onChangeText={setP('email')} keyboardType="email-address" autoCapitalize="none" /></Field>
               <Field label="Phone Number" last><TextField placeholder="(602) 555-0123" value={pf.phone} onChangeText={setP('phone')} keyboardType="phone-pad" /></Field>
             </Step>
           );
-        case 2:
+        case 3:
           return (
             <Step q="Where do you play?" s="Your school and sport power your profile.">
               <Field label="School / High School"><TextField placeholder="Desert Ridge High School" value={pf.school} onChangeText={setP('school')} autoCapitalize="words" /></Field>
               <Field label="Sport" last><Select placeholder="Select sport" options={SPORTS} value={pf.sport} onChange={setP('sport')} /></Field>
             </Step>
           );
-        case 3:
+        case 4:
           return (
             <Step q="Tell us about your game" s="A couple details for your player card.">
               <Field label="Jersey Number"><TextField placeholder="12" value={pf.jersey_number} onChangeText={setP('jersey_number')} keyboardType="number-pad" maxLength={3} /></Field>
               <Field label="H.S. Graduation Year" last><Select placeholder="Select year" options={GRAD_YEARS} value={pf.grad_year} onChange={setP('grad_year')} /></Field>
             </Step>
           );
-        case 4:
+        case 5:
           return (
             <Step q="Parent or guardian info" s="Required for athletes — they'll co-sign your account.">
               <Row>
@@ -288,15 +336,11 @@ export function SignupQuiz() {
               </Row>
             </Step>
           );
-        case 5:
+        case 6:
           return (
             <Step q="Secure your account" s="Almost there — set a password.">
               <Field label="Password"><PasswordField placeholder="Min. 8 characters" value={pf.password} onChangeText={setP('password')} /></Field>
               <Field label="Confirm Password" last><PasswordField placeholder="Re-enter password" value={pf.confirm} onChangeText={setP('confirm')} /></Field>
-              <Pressable style={styles.checkRow} onPress={() => setAgeOk((v) => !v)}>
-                <View style={[styles.checkbox, ageOk && styles.checkboxOn]}>{ageOk && <Ionicons name="checkmark" size={13} color={colors.white} />}</View>
-                <Text style={styles.checkText}>I confirm the athlete is <Text style={styles.checkStrong}>13 years of age or older</Text>.</Text>
-              </Pressable>
             </Step>
           );
       }
@@ -478,11 +522,13 @@ const styles = StyleSheet.create({
 
   row: { flexDirection: 'row', gap: 14 },
 
-  checkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 4 },
-  checkbox: { width: 18, height: 18, borderRadius: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-  checkboxOn: { backgroundColor: colors.blue, borderColor: colors.blue },
-  checkText: { flex: 1, fontSize: 13, color: colors.muted, lineHeight: 18 },
-  checkStrong: { color: 'rgba(255,255,255,0.85)', fontWeight: '700' },
+  blockedPanel: {
+    marginTop: 20, padding: 16, borderRadius: 12,
+    backgroundColor: 'rgba(255,85,85,0.08)', borderWidth: 1, borderColor: 'rgba(255,85,85,0.3)',
+  },
+  blockedTitle: { color: colors.white, fontFamily: fonts.condBold, fontSize: 15, letterSpacing: 0.3, marginBottom: 6 },
+  blockedBody: { color: colors.muted, fontSize: 13, lineHeight: 19 },
+  blockedStrong: { color: 'rgba(255,255,255,0.85)', fontWeight: '700' },
 
   forgotWrap: { alignSelf: 'flex-end', marginBottom: 8, marginTop: -4 },
   forgot: { fontSize: 12, color: colors.muted, textDecorationLine: 'underline' },

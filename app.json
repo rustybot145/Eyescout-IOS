@@ -47,6 +47,7 @@
       "expo-font",
       "expo-secure-store",
       "expo-splash-screen",
+      "expo-updates",
       [
         "expo-image-picker",
         {
@@ -63,6 +64,12 @@
         "projectId": "861e6965-bc7f-4c61-a845-67c873fcb294"
       }
     },
-    "owner": "eyescoutsports"
+    "owner": "eyescoutsports",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/861e6965-bc7f-4c61-a845-67c873fcb294"
+    }
   }
 }

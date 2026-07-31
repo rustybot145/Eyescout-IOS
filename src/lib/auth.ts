@@ -12,6 +12,7 @@ export type PlayerSignup = {
   sport: string;
   jersey_number: string;
   grad_year: string;
+  birth_date: string; // ISO 'YYYY-MM-DD' — real age assurance, see SignupQuiz
   parent_first: string;
   parent_last: string;
   parent_email: string;
@@ -56,6 +57,7 @@ export async function signUpPlayer(f: PlayerSignup): Promise<AuthResult> {
     sport: f.sport,
     jersey: f.jersey_number.trim(),
     grad_year: f.grad_year,
+    birth_date: f.birth_date,
     parent_first: f.parent_first.trim(),
     parent_last: f.parent_last.trim(),
     parent_email: f.parent_email.trim(),
