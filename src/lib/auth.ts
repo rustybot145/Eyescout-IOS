@@ -9,7 +9,8 @@ export type PlayerSignup = {
   email: string;
   phone: string;
   school: string;
-  sport: string;
+  sport: string; // primary sport — sports[0]. Still what coach scouting matches on.
+  sports: string[]; // up to 2, matches the web signup exactly (login.html)
   jersey_number: string;
   grad_year: string;
   birth_date: string; // ISO 'YYYY-MM-DD' — real age assurance, see SignupQuiz
@@ -55,6 +56,7 @@ export async function signUpPlayer(f: PlayerSignup): Promise<AuthResult> {
     phone: f.phone.trim(),
     school: f.school.trim(),
     sport: f.sport,
+    sports: f.sports,
     jersey: f.jersey_number.trim(),
     grad_year: f.grad_year,
     birth_date: f.birth_date,

@@ -28,6 +28,7 @@ import { fonts } from '../theme/fonts';
 import { Orbs } from './Orbs';
 import { GradientButton } from './GradientButton';
 import { Select } from './Select';
+import { SportMultiSelect } from './SportMultiSelect';
 import { TextField, PasswordField, FieldLabel, ErrorMsg } from './fields';
 import { SPORTS, COACH_SPORTS, GRAD_YEARS, DIVISIONS, TITLES, BIRTH_MONTHS, BIRTH_DAYS, BIRTH_YEARS } from '../theme/options';
 import { signUpPlayer, signUpCoach, signIn, forgotPassword } from '../lib/auth';
@@ -40,7 +41,7 @@ const isEmail = (v: string) => /\S+@\S+\.\S+/.test(v.trim());
 type Role = 'player' | 'coach';
 
 const emptyPlayer = {
-  athlete_first: '', athlete_last: '', email: '', phone: '', school: '', sport: '', jersey_number: '',
+  athlete_first: '', athlete_last: '', email: '', phone: '', school: '', sports: [] as string[], jersey_number: '',
   grad_year: '', birth_month: '', birth_day: '', birth_year: '',
   parent_first: '', parent_last: '', parent_email: '', parent_phone: '', zip: '',
   password: '', confirm: '',
@@ -122,7 +123,7 @@ export function SignupQuiz() {
           return '';
         }
         case 2: return !isEmail(pf.email) ? 'Please enter a valid email.' : !pf.phone.trim() ? 'Please enter your phone number.' : '';
-        case 3: return pf.school.trim() && pf.sport ? '' : 'Please add your school and sport.';
+        case 3: return pf.school.trim() && pf.sports.length ? '' : 'Please add your school and sport.';
         case 4: return pf.jersey_number.trim() && pf.grad_year ? '' : 'Please add your jersey number and graduation year.';
         case 5:
           if (!(pf.parent_first.trim() && pf.parent_last.trim() && pf.parent_phone.trim() && pf.zip.trim())) return 'Please complete the parent/guardian details.';
@@ -150,7 +151,11 @@ export function SignupQuiz() {
     if (role === 'player') {
       const { birth_month, birth_day, birth_year, ...rest } = pf;
       const birth_date = `${birth_year}-${birth_month}-${birth_day}`;
-      const res = await signUpPlayer({ ...rest, birth_date });
+      // Primary sport is whichever was picked first — same rule the web signup
+      // uses (login.html: sport = signupSports[0]). Coach scouting matches on
+      // this single column; `sports` (both picks) is additive, for the
+      // player's own feed personalization only.
+      const res = await signUpPlayer({ ...rest, sport: rest.sports[0], birth_date });
       if (!res.ok) { setBusy(false); return setErr(res.error); }
       // Sales funnel: land the brand-new player on the Pro offer (X → profile).
       router.replace({ pathname: '/paywall', params: { role: 'player', from: 'signup' } });
@@ -313,7 +318,14 @@ export function SignupQuiz() {
           return (
             <Step q="Where do you play?" s="Your school and sport power your profile.">
               <Field label="School / High School"><TextField placeholder="Desert Ridge High School" value={pf.school} onChangeText={setP('school')} autoCapitalize="words" /></Field>
-              <Field label="Sport" last><Select placeholder="Select sport" options={SPORTS} value={pf.sport} onChange={setP('sport')} /></Field>
+              <Field label="Sport(s)" last>
+                <SportMultiSelect
+                  placeholder="Select sport(s)"
+                  options={SPORTS}
+                  values={pf.sports}
+                  onChange={(v) => setPf((p) => ({ ...p, sports: v }))}
+                />
+              </Field>
             </Step>
           );
         case 4:
