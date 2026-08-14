@@ -121,7 +121,18 @@ export async function purchasePro(): Promise<PurchaseResult> {
   } catch (e: any) {
     // RevenueCat sets userCancelled for a dismissed sheet — not an error state.
     if (e?.userCancelled) return 'cancelled';
-    lastPurchaseError = e?.message ? String(e.message) : 'Purchase could not be completed';
+    // RevenueCat puts the useful part in readableErrorCode and, for StoreKit
+    // failures, underlyingErrorMessage — `message` is often empty, which is why
+    // this read as a bare "could not be completed" with nothing to act on.
+    const parts = [
+      e?.readableErrorCode,
+      e?.code != null ? `code ${e.code}` : null,
+      e?.underlyingErrorMessage,
+      e?.message,
+    ].filter(Boolean);
+    lastPurchaseError = parts.length
+      ? String(parts.join(' · ')).slice(0, 300)
+      : 'Purchase could not be completed (store gave no reason)';
     toast(lastPurchaseError, 'err');
     return 'error';
   }
