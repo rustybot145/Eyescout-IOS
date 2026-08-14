@@ -4,9 +4,22 @@ import { supabase } from '../lib/supabase';
 // admin, by follows, and by hype milestones) plus derives "message" items from
 // unread coach threads — exactly like activity.html. No schema change.
 
+// Every type the platform writes, not just the ones this screen was built for.
+// The web writes follow / coach_follow / message / hype_milestone; the admin
+// panel writes post_removed / admin_message. Missing one used to crash the
+// screen, so anything new must be added here AND given a case in activity.tsx —
+// which now has a default arm as a backstop either way.
+export type NotifType =
+  | 'follow'
+  | 'coach_follow'
+  | 'message'
+  | 'admin_message'
+  | 'hype_milestone'
+  | 'post_removed';
+
 export type Notif = {
   id: string;
-  type: 'follow' | 'message' | 'hype_milestone' | 'post_removed';
+  type: NotifType;
   actorId: string | null;
   actorName: string;
   targetId: string;
@@ -35,7 +48,15 @@ export async function fetchNotifications(uid: string): Promise<Notif[]> {
 
   const following = new Set((followRes.data || []).map((f) => f.followee_id));
 
-  const base: Notif[] = (notifRes.data || []).map((r) => ({
+  // Message notifications exist in the table so the email webhook has a row to
+  // fire on — they are NOT for display here. This screen builds richer message
+  // items (with a preview) from the threads below, so keeping the rows too would
+  // show every message twice.
+  const SYNTHESIZED_FROM_THREADS = new Set(['message', 'admin_message']);
+
+  const base: Notif[] = (notifRes.data || [])
+    .filter((r) => !SYNTHESIZED_FROM_THREADS.has(r.type))
+    .map((r) => ({
     id: r.id,
     type: r.type,
     actorId: r.actor_id || null,

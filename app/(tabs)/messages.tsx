@@ -11,6 +11,7 @@ import { fonts } from '../../src/theme/fonts';
 import { Avatar } from '../../src/components/Avatar';
 import { Thread, ChatMsg, fetchThreads, saveThread, deleteThread } from '../../src/data/messages';
 import { getCurrentUserId } from '../../src/data/user';
+import { notifyNewMessage } from '../../src/data/notify';
 import { confirm, openReport } from '../../src/components/Overlays';
 import { timeAgo, formatTime, formatDate } from '../../src/lib/format';
 
@@ -81,8 +82,12 @@ export default function MessagesScreen() {
       const updated = { ...active, messages: [...active.messages, msg] };
       setThreads((prev) => prev.map((x) => (x.id === active.id ? updated : x)));
       await saveThread(updated);
+      // saveThread is also used for mark-as-read, so the notification belongs
+      // here at the real send rather than inside it. Admin threads have no
+      // coachId and notifyNewMessage ignores those.
+      notifyNewMessage(updated.id, updated.coachId, uid);
     },
-    [active]
+    [active, uid]
   );
 
   const onDelete = useCallback(async (t: Thread) => {

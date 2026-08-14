@@ -78,8 +78,9 @@ export default function ActivityScreen() {
   );
 
   const filtered = items.filter((n) => {
-    if (tab === 'follows') return n.type === 'follow';
-    if (tab === 'messages') return n.type === 'message';
+    // coach_follow is still a follow — it was silently missing from this tab.
+    if (tab === 'follows') return n.type === 'follow' || n.type === 'coach_follow';
+    if (tab === 'messages') return n.type === 'message' || n.type === 'admin_message';
     return true;
   });
 
@@ -144,9 +145,10 @@ function NotifRow({
 }) {
   const icon = iconFor(n.type);
   const body = bodyFor(n);
-  const Wrap: any = n.type === 'message' ? Pressable : View;
+  const opensMessages = n.type === 'message' || n.type === 'admin_message';
+  const Wrap: any = opensMessages ? Pressable : View;
   return (
-    <Wrap style={styles.row} onPress={n.type === 'message' ? onOpenMessages : undefined}>
+    <Wrap style={styles.row} onPress={opensMessages ? onOpenMessages : undefined}>
       <View style={[styles.avatar, { backgroundColor: icon.bg, borderColor: icon.border }]}>
         <Ionicons name={icon.name as any} size={20} color={icon.color} />
       </View>
@@ -162,7 +164,7 @@ function NotifRow({
         ) : null}
         <Text style={styles.rowTime}>{timeAgo(n.createdAt)}</Text>
       </View>
-      {n.type === 'follow' && n.actorId ? (
+      {(n.type === 'follow' || n.type === 'coach_follow') && n.actorId ? (
         <Pressable
           onPress={() => onFollowBack(n.actorId!)}
           style={[styles.followBack, following && styles.followingBack]}
@@ -178,16 +180,24 @@ function NotifRow({
   );
 }
 
-function iconFor(type: Notif['type']) {
+// Every arm must return a value. Without the default, an unknown type returned
+// undefined and the caller blew up on icon.bg — which is what took this whole
+// screen down for anyone a coach had followed (type 'coach_follow', written by
+// the web and never handled here).
+function iconFor(type: Notif['type'] | string) {
   switch (type) {
     case 'follow':
+    case 'coach_follow':
       return { name: 'person', bg: 'rgba(123,47,190,0.16)', border: 'rgba(123,47,190,0.3)', color: '#c084fc' };
     case 'message':
+    case 'admin_message':
       return { name: 'chatbubble', bg: 'rgba(30,144,255,0.12)', border: 'rgba(30,144,255,0.3)', color: colors.blue };
     case 'hype_milestone':
       return { name: 'star', bg: 'rgba(168,85,247,0.14)', border: 'rgba(168,85,247,0.3)', color: '#a855f7' };
     case 'post_removed':
       return { name: 'warning', bg: 'rgba(255,77,109,0.1)', border: 'rgba(255,77,109,0.28)', color: '#ff4d6d' };
+    default:
+      return { name: 'notifications', bg: 'rgba(255,255,255,0.06)', border: 'rgba(255,255,255,0.14)', color: 'rgba(255,255,255,0.7)' };
   }
 }
 
@@ -195,12 +205,20 @@ function bodyFor(n: Notif): { strong: string; rest: string; preview?: string } {
   switch (n.type) {
     case 'follow':
       return { strong: n.actorName || 'Someone', rest: ' started following you' };
+    case 'coach_follow':
+      return { strong: n.actorName || 'A coach', rest: ' started following you' };
     case 'message':
       return { strong: n.actorName || 'A coach', rest: ' sent you a message', preview: n.text };
+    case 'admin_message':
+      return { strong: 'EyeScout Sports', rest: ' sent you a message', preview: n.text };
     case 'hype_milestone':
       return { strong: `🔥 ${n.actorName} hype!`, rest: ` Your post just reached ${n.actorName} hype — keep it going.` };
     case 'post_removed':
       return { strong: 'A post was removed', rest: ' for violating our community guidelines' };
+    default:
+      // Unknown type from a newer web/admin release. Show something honest
+      // rather than crashing the screen.
+      return { strong: n.actorName || 'EyeScout', rest: ' sent you an update' };
   }
 }
 

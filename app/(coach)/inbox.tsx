@@ -12,6 +12,7 @@ import { Avatar } from '../../src/components/Avatar';
 import { confirm, openReport } from '../../src/components/Overlays';
 import { CoachThread, ChatMsg, fetchCoachThreads, saveThread, deleteThread } from '../../src/data/messages';
 import { getCurrentCoach } from '../../src/data/coach';
+import { notifyNewMessage } from '../../src/data/notify';
 import { useProAccess } from '../../src/lib/useProAccess';
 import { PaywallScreen } from '../../src/components/Paywall';
 import { timeAgo, formatTime, formatDate } from '../../src/lib/format';
@@ -81,8 +82,10 @@ export default function CoachInboxScreen() {
       const updated = { ...active, messages: [...active.messages, msg] };
       setThreads((prev) => prev.map((x) => (x.id === active.id ? updated : x)));
       await saveThread(updated);
+      // See the matching note in the player inbox.
+      notifyNewMessage(updated.id, updated.playerId, coachId);
     },
-    [active]
+    [active, coachId]
   );
 
   const onDelete = useCallback(async (t: CoachThread) => {

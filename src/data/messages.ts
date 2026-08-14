@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { notifyNewMessage } from './notify';
 import { fetchHiddenIds } from './blocks';
 
 // DMs read/write the SAME messages table the web portal uses. A thread is one
@@ -147,5 +148,6 @@ export async function sendCoachMessage(
     updated_at: new Date().toISOString(),
   };
   const { error } = await supabase.from('messages').upsert(row);
+  if (!error) notifyNewMessage(id, playerId, coach.id);
   return { error };
 }

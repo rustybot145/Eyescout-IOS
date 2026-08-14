@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { notifyNewFollow } from './notify';
 import { fetchHiddenIds } from './blocks';
 
 // The feed reads the SAME tables the web portal reads and the admin writes:
@@ -95,7 +96,10 @@ export function toggleHype(postId: string, userId: string, nowHyped: boolean) {
 
 // Fire-and-forget follow toggle — identical shape to the web's _sbToggleFollow.
 export function toggleFollow(followerId: string, followeeId: string, nowFollowing: boolean) {
-  if (nowFollowing)
+  if (nowFollowing) {
     supabase.from('follows').upsert({ follower_id: followerId, followee_id: followeeId }).then(undefined, () => {});
-  else supabase.from('follows').delete().match({ follower_id: followerId, followee_id: followeeId }).then(undefined, () => {});
+    // Every follow in the app routes through here, so this is the one place the
+    // notification needs to be written — matching the web's _notifyNewFollow.
+    notifyNewFollow(followerId, followeeId);
+  } else supabase.from('follows').delete().match({ follower_id: followerId, followee_id: followeeId }).then(undefined, () => {});
 }
