@@ -7,7 +7,7 @@ import { colors, gradient } from '../theme/colors';
 import { fonts } from '../theme/fonts';
 import { GradientButton } from './GradientButton';
 import { fetchHasPro } from '../data/subscription';
-import { purchasePro, restorePro } from '../lib/iap';
+import { purchasePro, restorePro, lastPurchaseError } from '../lib/iap';
 import { hapticSuccess } from '../lib/haptics';
 import { toast } from './Overlays';
 
@@ -22,15 +22,21 @@ export function useProUpgrade(role: Role) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [celebrating, setCelebrating] = useState(false);
+  const [error, setError] = useState('');
 
   const upgrade = useCallback(async () => {
     setBusy(true);
+    setError('');
     const result = await purchasePro();
     setBusy(false);
     if (result === 'success' && (await fetchHasPro())) {
       hapticSuccess(); // the unlock reveal deserves the one big confirmation buzz
       setCelebrating(true);
+      return;
     }
+    // Anything other than a deliberate cancel gets shown on the paywall itself.
+    // Reporting only through toast() hid these entirely behind the modal.
+    if (result !== 'cancelled') setError(lastPurchaseError);
   }, []);
 
   // Apple requires a Restore Purchases path on every subscription paywall.
@@ -49,7 +55,7 @@ export function useProUpgrade(role: Role) {
     router.replace(role === 'coach' ? '/(coach)/news' : '/(tabs)/feed');
   }, [role, router]);
 
-  return { busy, upgrade, restore, celebrating, finish };
+  return { busy, upgrade, restore, celebrating, finish, error };
 }
 
 export function ProCelebration({ visible, role, onDone }: { visible: boolean; role: Role; onDone: () => void }) {

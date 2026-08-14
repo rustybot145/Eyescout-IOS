@@ -117,7 +117,7 @@ export function PaywallScreen({
   const insets = useSafeAreaInsets();
   const perks = role === 'coach' ? COACH_PERKS : PLAYER_PERKS;
   const hero = HERO[role];
-  const { busy, upgrade, restore, celebrating, finish } = useProUpgrade(role);
+  const { busy, upgrade, restore, celebrating, finish, error } = useProUpgrade(role);
 
   return (
     <View style={styles.root}>
@@ -162,6 +162,7 @@ export function PaywallScreen({
 
         <View style={{ width: '100%', marginTop: 22 }}>
           <GradientButton label="Upgrade to Pro" onPress={upgrade} loading={busy} />
+          {error ? <Text style={styles.purchaseError}>{error}</Text> : null}
         </View>
 
         {/* Apple Guideline 3.1.2: restore path + auto-renew disclosure + legal links */}
@@ -242,6 +243,10 @@ const styles = StyleSheet.create({
   pricePer: { color: colors.muted, fontSize: 17, fontWeight: '700', marginLeft: 5, marginBottom: 9 },
   priceSub: { color: colors.muted, fontSize: 13.5, textAlign: 'center', marginTop: 6 },
 
+  purchaseError: {
+    color: '#ff6b6b', fontSize: 12.5, lineHeight: 18, textAlign: 'center',
+    marginTop: 10, paddingHorizontal: 8,
+  },
   restoreBtn: { marginTop: 18, paddingVertical: 6, alignItems: 'center' },
   restoreText: { color: colors.muted, fontSize: 14, fontWeight: '600', textDecorationLine: 'underline' },
   disclosure: { color: colors.faint, fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 16, maxWidth: 330 },

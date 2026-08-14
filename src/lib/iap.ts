@@ -79,24 +79,50 @@ export async function proPriceLabel(): Promise<string> {
 
 // Kick off the native purchase sheet for Pro. Returns how it ended so the
 // checkout screen can play the unlock reveal on success.
+// Why the last purchase attempt failed, in words, for the UI to show inline.
+// Every failure here used to report ONLY via toast(), and toasts fired from a
+// screen presented with presentation:'modal' were invisible — so all four
+// failure modes looked identical to a button that did nothing. The UI now shows
+// this on the paywall itself, which cannot be swallowed by a presentation layer.
+export let lastPurchaseError = '';
+
 export async function purchasePro(): Promise<PurchaseResult> {
+  lastPurchaseError = '';
   if (!isIapAvailable()) {
-    toast('Subscriptions are not available in this build', 'err');
+    // Distinguishes the two very different causes: running in Expo Go (no
+    // billing module) vs a real build whose RevenueCat key never made it in.
+    lastPurchaseError = SDK_KEY
+      ? 'In-app purchases need a real build (not Expo Go).'
+      : 'Store key missing from this build — RevenueCat is not configured.';
+    toast(lastPurchaseError, 'err');
     return 'unavailable';
   }
   try {
     const offerings = await Purchases.getOfferings();
     const pkg = offerings.current?.availablePackages?.[0];
     if (!pkg) {
+      // The single most common setup miss: a product attached to an entitlement
+      // but never put in an Offering marked Current, so `current` is empty.
+      const all = Object.keys(offerings.all || {}).length;
+      lastPurchaseError = all
+        ? `Store returned ${all} offering(s) but none is set as Current in RevenueCat.`
+        : 'Store returned no offerings. Check the RevenueCat Offering and the App Store Paid Applications agreement.';
       toast('Subscription unavailable right now', 'err');
       return 'unavailable';
     }
     const { customerInfo } = await Purchases.purchasePackage(pkg);
-    return customerInfo.entitlements.active[PRO_ENTITLEMENT_ID] ? 'success' : 'error';
+    if (customerInfo.entitlements.active[PRO_ENTITLEMENT_ID]) return 'success';
+    // Bought, but the entitlement did not come back — almost always the
+    // app-specific shared secret missing in RevenueCat, so the receipt can't
+    // be validated.
+    lastPurchaseError = 'Purchase completed but Pro did not unlock. Check the App-Specific Shared Secret in RevenueCat.';
+    toast(lastPurchaseError, 'err');
+    return 'error';
   } catch (e: any) {
     // RevenueCat sets userCancelled for a dismissed sheet — not an error state.
     if (e?.userCancelled) return 'cancelled';
-    toast('Purchase could not be completed', 'err');
+    lastPurchaseError = e?.message ? String(e.message) : 'Purchase could not be completed';
+    toast(lastPurchaseError, 'err');
     return 'error';
   }
 }

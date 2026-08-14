@@ -95,17 +95,25 @@ function Toast({ message, tone, onDone }: { message: string; tone: 'ok' | 'err';
     return () => clearTimeout(t);
   }, [y, op, onDone]);
 
+  // Wrapped in a Modal on purpose. OverlayHost is a sibling of the navigator, so
+  // a plain View draws inside the root view — which iOS renders BENEATH any
+  // screen presented with presentation:'modal' (paywall, create-post). Toasts
+  // fired from those screens were dispatched and rendered, but invisible, so
+  // every purchase failure looked like a dead button. A transparent Modal gets
+  // its own container above them.
   return (
-    <View style={styles.toastWrap} pointerEvents="none">
-      <Animated.View style={[styles.toast, { opacity: op, transform: [{ translateY: y }] }]}>
-        <Ionicons
-          name={tone === 'ok' ? 'checkmark-circle' : 'alert-circle'}
-          size={18}
-          color={tone === 'ok' ? '#39D353' : '#ff5555'}
-        />
-        <Text style={styles.toastText}>{message}</Text>
-      </Animated.View>
-    </View>
+    <Modal transparent visible animationType="none" statusBarTranslucent>
+      <View style={styles.toastWrap} pointerEvents="none">
+        <Animated.View style={[styles.toast, { opacity: op, transform: [{ translateY: y }] }]}>
+          <Ionicons
+            name={tone === 'ok' ? 'checkmark-circle' : 'alert-circle'}
+            size={18}
+            color={tone === 'ok' ? '#39D353' : '#ff5555'}
+          />
+          <Text style={styles.toastText}>{message}</Text>
+        </Animated.View>
+      </View>
+    </Modal>
   );
 }
 
