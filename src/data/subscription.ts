@@ -1,37 +1,39 @@
 import { supabase } from '../lib/supabase';
-import { isProEntitled } from '../lib/iap';
 import { FeedPost } from './feed';
 
-// EyeScout Sports Pro — $15/month. Access is enforced at the DATABASE level by
-// the same functions the web paywall uses; this module just reads them so the UI
-// can show the right thing:
-//   • _es_viewer_has_feed_access()  → true for a Pro player, or a verified + paid
-//     coach. Drives every "is this unlocked?" decision.
-//   • feed_preview()                → the exactly-2-post teaser a non-Pro user
-//     may see (the cap lives in the DB function, so it can't be bypassed).
-// No client can self-grant Pro; a real subscription is written only by the
-// server after PayPal confirms payment.
-
-export const PRO_PRICE = 15;
-
-// Does the CURRENT signed-in user have Pro / feed access right now?
+// Access control for the app. EyeScout is free as of 2026-08-15, so this module
+// is now mostly a record of how the paywall worked rather than a working one.
 //
-// Two independent sources, either of which unlocks:
-//   • the DATABASE (_es_viewer_has_feed_access) — the durable record the web app
-//     and RLS use, written server-side by the RevenueCat webhook.
-//   • the STORE (RevenueCat entitlement) — receipt-validated on RevenueCat's
-//     servers, available the instant a purchase completes.
+// What is still deployed on the server and untouched, so charging again is a
+// client-side change plus one migration:
+//   • _es_viewer_has_feed_access()  → the DB's own "is this viewer unlocked?"
+//   • feed_preview()                → the DB-capped 2-post teaser for non-Pro
 //
-// The store check exists because the webhook is asynchronous: without it, a user
-// who just paid through Apple's sheet would bounce off the paywall until the
-// webhook landed. Checked in parallel so this stays one round-trip of latency.
+// See RESTORING-PRO.md in the eyescout-site repo, which covers both halves.
+
+// Does the CURRENT signed-in user have full access? Yes — EyeScout is free.
+//
+// Ben's call (2026-08-15): Pro is switched off until there are enough users to
+// charge. Signing in is the only requirement.
+//
+// This is THE gate for the whole app. Every screen reads it through
+// useProAccess(), so returning true unlocks the feed, Activity, Scout, the coach
+// inbox and posting at once, and every `hasPro === false` branch becomes
+// unreachable. The web has the identical switch in _subHasAccess().
+//
+// NOTE FOR RESTORING: the database function _es_viewer_has_feed_access() is
+// still deployed and still answers correctly — it was NOT dropped by the phase 9
+// migration, which only removed RLS policies. Restoring the body below is
+// therefore enough to re-gate the mobile app.
+//
+//   const [dbRes, entitled] = await Promise.all([
+//     supabase.rpc('_es_viewer_has_feed_access'),
+//     isProEntitled(),
+//   ]);
+//   if (entitled) return true;
+//   return !dbRes.error && dbRes.data === true;
 export async function fetchHasPro(): Promise<boolean> {
-  const [dbRes, entitled] = await Promise.all([
-    supabase.rpc('_es_viewer_has_feed_access'),
-    isProEntitled(),
-  ]);
-  if (entitled) return true;
-  return !dbRes.error && dbRes.data === true;
+  return true;
 }
 
 // The 2-post teaser for a non-Pro user (DB-capped).
@@ -55,25 +57,4 @@ export async function fetchFeedPreview(uid: string | null): Promise<FeedPost[]> 
     following: false,
     isMine: r.author_id === uid,
   }));
-}
-
-export type Subscription = {
-  status: 'active' | 'cancelled' | 'none';
-  nextBillingDate: string | null;
-  price: number;
-};
-
-// The current user's own subscription row (for display in Settings/Profile).
-export async function getSubscription(uid: string): Promise<Subscription> {
-  const { data } = await supabase
-    .from('subscriptions')
-    .select('status, expires_at, started_at, price')
-    .eq('user_id', uid)
-    .maybeSingle();
-  if (!data) return { status: 'none', nextBillingDate: null, price: PRO_PRICE };
-  return {
-    status: (data.status as any) || 'none',
-    nextBillingDate: data.expires_at || null,
-    price: data.price || PRO_PRICE,
-  };
 }

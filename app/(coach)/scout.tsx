@@ -12,8 +12,6 @@ import { Select } from '../../src/components/Select';
 import { TextField } from '../../src/components/fields';
 import { ComposeMessage } from '../../src/components/ComposeMessage';
 import { toast } from '../../src/components/Overlays';
-import { PaywallScreen } from '../../src/components/Paywall';
-import { useProAccess } from '../../src/lib/useProAccess';
 import { GRAD_YEARS } from '../../src/theme/options';
 import { Coach, PlayerCard, getCurrentCoach, fetchPlayers } from '../../src/data/coach';
 import { sendCoachMessage } from '../../src/data/messages';
@@ -69,7 +67,6 @@ function matchesSearch(p: PlayerCard, raw: string): boolean {
 export default function ScoutScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { hasPro } = useProAccess();
   const [coach, setCoach] = useState<Coach | null>(null);
   const [players, setPlayers] = useState<PlayerCard[]>([]);
   const [loading, setLoading] = useState(true);
@@ -184,10 +181,6 @@ export default function ScoutScreen() {
       </View>
     );
   }
-  if (hasPro === false) {
-    return <PaywallScreen role="coach" uid={coach?.id} title="Scout and search every athlete in your sport with Pro." />;
-  }
-
   return (
     <View style={styles.root}>
       {/* Header */}

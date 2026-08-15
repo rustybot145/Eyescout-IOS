@@ -8,7 +8,6 @@ import { colors, gradient } from '../../src/theme/colors';
 import { fonts } from '../../src/theme/fonts';
 import { GradientText } from '../../src/components/GradientText';
 import { Coach, getCurrentCoach } from '../../src/data/coach';
-import { fetchHasPro } from '../../src/data/subscription';
 import { supabase } from '../../src/lib/supabase';
 import { signOutEverywhere } from '../../src/lib/auth';
 
@@ -16,7 +15,6 @@ export default function CoachProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [coach, setCoach] = useState<Coach | null>(null);
-  const [hasPro, setHasPro] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -27,7 +25,6 @@ export default function CoachProfileScreen() {
       return;
     }
     setCoach(c);
-    setHasPro(await fetchHasPro());
   }, [router]);
 
   useFocusEffect(
@@ -138,33 +135,6 @@ export default function CoachProfileScreen() {
               <Text style={styles.btnOutlineText}>Sign Out</Text>
             </Pressable>
           </View>
-
-          {/* EyeScout Sports Pro */}
-          {hasPro === false ? (
-            <Pressable
-              style={styles.proBanner}
-              onPress={() => router.push({ pathname: '/paywall', params: { role: 'coach' } })}
-            >
-              <View style={styles.proBadge}>
-                <Ionicons name="star" size={20} color="#fff" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.proTitle}>EyeScout Sports Pro</Text>
-                <Text style={styles.proSub}>Scout, message & more</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.blue} />
-            </Pressable>
-          ) : hasPro ? (
-            <View style={[styles.proBanner, { borderColor: 'rgba(57,211,83,0.3)', backgroundColor: 'rgba(57,211,83,0.06)' }]}>
-              <View style={[styles.proBadge, { backgroundColor: 'rgba(57,211,83,0.15)', borderColor: 'rgba(57,211,83,0.3)' }]}>
-                <Ionicons name="checkmark" size={20} color="#39D353" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.proTitle}>EyeScout Sports Pro</Text>
-                <Text style={styles.proSub}>Your subscription is active</Text>
-              </View>
-            </View>
-          ) : null}
 
           {coach.bio ? (
             <>

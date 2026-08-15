@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, Pressable, Image, Switch, ActivityIndicator,
+  View, Text, ScrollView, StyleSheet, Pressable, Image, Switch, ActivityIndicator, AppState,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -21,7 +21,7 @@ import { toast } from '../src/components/Overlays';
 import { hapticSuccess, hapticError } from '../src/lib/haptics';
 import { deleteAccountFlow } from '../src/lib/account';
 import { openTerms, openPrivacy, openSupport } from '../src/lib/legal';
-import { getSubscription } from '../src/data/subscription';
+import { isProEntitled, openManageSubscription } from '../src/lib/iap';
 import { supabase } from '../src/lib/supabase';
 import { signOutEverywhere } from '../src/lib/auth';
 
@@ -130,8 +130,8 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 48 }} showsVerticalScrollIndicator={false}>
-        {/* EyeScout Sports Pro */}
-        <ProRow uid={uid} />
+        {/* Only renders for a legacy subscriber Apple is still billing. */}
+        <LegacySubscriptionRow />
 
         {/* Profile Photo */}
         <Section title="Profile Photo">
@@ -254,9 +254,10 @@ export default function SettingsScreen() {
         </Section>
 
         {/* App Review expects the EULA and privacy policy reachable from the app
-            itself, not only from the paywall — Guideline 1.2 for user-generated
-            content, and 5.1.1 for privacy. Support is here so reviewers (and
-            users) always have a contact route. */}
+            itself — Guideline 1.2 for user-generated content, and 5.1.1 for
+            privacy. These used to also be linked from the paywall, which is gone,
+            so this screen is now the only route to them. Support is here so
+            reviewers (and users) always have a contact route. */}
         <Section title="About" style={{ marginTop: 32 }}>
           <Pressable style={styles.accountRow} onPress={openTerms}>
             <Ionicons name="document-text-outline" size={19} color={colors.muted} />
@@ -279,39 +280,63 @@ export default function SettingsScreen() {
   );
 }
 
-// EyeScout Sports Pro status + upgrade entry point.
-function ProRow({ uid }: { uid: string | null }) {
-  const router = useRouter();
-  const [active, setActive] = useState<boolean | null>(null);
+// Shown ONLY to someone Apple is still billing for the old Pro subscription.
+//
+// EyeScout is free, but removing a product from sale never cancels an existing
+// subscriber — Apple keeps charging until THEY cancel. Saying nothing would mean
+// quietly taking money for something everyone else now gets free, so anyone with
+// a live entitlement gets told, and gets a one-tap route to Apple's cancel page.
+//
+// Everyone else — which is almost everyone — sees nothing at all here.
+//
+// The store, not our database, is the source of truth for this: the DB row can
+// be stale or missing, while `isProEntitled()` reflects what Apple is actually
+// still charging for.
+function LegacySubscriptionRow() {
+  const [stillSubscribed, setStillSubscribed] = useState(false);
+
+  const load = useCallback(async () => {
+    setStillSubscribed(await isProEntitled());
+  }, []);
+
   useEffect(() => {
-    (async () => {
-      if (!uid) return;
-      const sub = await getSubscription(uid);
-      setActive(sub.status === 'active' || sub.status === 'cancelled');
-    })();
-  }, [uid]);
+    load();
+    // Cancelling happens in the App Store app, not here, so nothing in this
+    // screen's lifecycle tells us it happened. Re-reading whenever the app comes
+    // back to the foreground is what makes the row disappear on its own.
+    const s = AppState.addEventListener('change', (st) => {
+      if (st === 'active') load();
+    });
+    return () => s.remove();
+  }, [load]);
+
+  if (!stillSubscribed) return null;
 
   return (
-    <Pressable
-      style={proStyles.wrap}
-      onPress={active ? undefined : () => router.push({ pathname: '/paywall', params: { role: 'player' } })}
-      disabled={!!active}
-    >
-      <View style={proStyles.badge}>
-        <Ionicons name="star" size={20} color="#fff" />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={proStyles.title}>EyeScout Sports Pro</Text>
-        <Text style={proStyles.sub}>{active ? 'Your subscription is active' : 'Unlock everything'}</Text>
-      </View>
-      {active ? (
-        <View style={proStyles.activePill}>
-          <Text style={proStyles.activeText}>ACTIVE</Text>
+    <>
+      <View style={[proStyles.wrap, proStyles.wrapAttached]}>
+        <View style={proStyles.badge}>
+          <Ionicons name="information-circle-outline" size={22} color={colors.blue} />
         </View>
-      ) : (
-        <Ionicons name="chevron-forward" size={18} color={colors.blue} />
-      )}
-    </Pressable>
+        <View style={{ flex: 1 }}>
+          <Text style={proStyles.title}>You're still subscribed</Text>
+          <Text style={proStyles.sub}>
+            EyeScout is free for everyone now. Cancel through Apple so you aren't charged again — you keep full access either way.
+          </Text>
+        </View>
+      </View>
+
+      <Pressable
+        style={proStyles.manageRow}
+        onPress={openManageSubscription}
+        accessibilityRole="button"
+        accessibilityLabel="Cancel subscription"
+        accessibilityHint="Opens your App Store subscription settings"
+      >
+        <Text style={proStyles.manageText}>Cancel Subscription</Text>
+        <Ionicons name="open-outline" size={15} color={colors.muted} />
+      </Pressable>
+    </>
   );
 }
 
@@ -320,14 +345,23 @@ const proStyles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 13, padding: 16, marginBottom: 16, borderRadius: 16,
     backgroundColor: 'rgba(30,144,255,0.06)', borderWidth: 1, borderColor: 'rgba(30,144,255,0.25)',
   },
+  // Square off the bottom so the cancel row reads as part of the same card.
+  wrapAttached: { marginBottom: 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderBottomWidth: 0 },
+  manageRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
+    paddingVertical: 13, marginBottom: 16,
+    borderRadius: 16, borderTopLeftRadius: 0, borderTopRightRadius: 0,
+    borderWidth: 1, borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(30,144,255,0.25)', borderTopColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(30,144,255,0.03)',
+  },
+  manageText: { color: colors.muted, fontSize: 13.5, fontWeight: '700', letterSpacing: 0.2 },
   badge: {
     width: 44, height: 44, borderRadius: 13, backgroundColor: 'rgba(30,144,255,0.15)',
     borderWidth: 1, borderColor: 'rgba(30,144,255,0.3)', alignItems: 'center', justifyContent: 'center',
   },
   title: { color: colors.white, fontSize: 15, fontWeight: '800', letterSpacing: 0.2 },
   sub: { color: colors.muted, fontSize: 12.5, marginTop: 2 },
-  activePill: { backgroundColor: 'rgba(57,211,83,0.14)', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
-  activeText: { color: '#39D353', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
 });
 
 function Section({ title, children, style }: { title: string; children: React.ReactNode; style?: any }) {

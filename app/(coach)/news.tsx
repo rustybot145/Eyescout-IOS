@@ -9,12 +9,10 @@ import { GradientText } from '../../src/components/GradientText';
 import { PostCard } from '../../src/components/PostCard';
 import { FeedSkeleton } from '../../src/components/Skeleton';
 import { Stories } from '../../src/components/Stories';
-import { PaywallCard } from '../../src/components/Paywall';
 import { openReport } from '../../src/components/Overlays';
 import { sharePost } from '../../src/lib/sharePost';
 import { hapticTap } from '../../src/lib/haptics';
 import { FeedPost, fetchFeed, toggleHype, toggleFollow } from '../../src/data/feed';
-import { fetchHasPro, fetchFeedPreview } from '../../src/data/subscription';
 import { getCurrentCoach, Coach } from '../../src/data/coach';
 
 const PAGE = 5;
@@ -31,7 +29,6 @@ export default function CoachNewsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [hasPro, setHasPro] = useState<boolean | null>(null);
 
   const viewConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
   const onViewableChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
@@ -44,12 +41,7 @@ export default function CoachNewsScreen() {
     const c = coach || (await getCurrentCoach());
     if (c && !coach) setCoach(c);
     if (!c) return;
-    const pro = await fetchHasPro();
-    setHasPro(pro);
-    const data = pro
-      ? await fetchFeed(c.id, c.sport === 'Multiple Sports' ? '' : c.sport)
-      : await fetchFeedPreview(c.id);
-    setPosts(data);
+    setPosts(await fetchFeed(c.id, c.sport === 'Multiple Sports' ? '' : c.sport));
     setVisible(PAGE);
   }, [coach]);
 
@@ -131,13 +123,12 @@ export default function CoachNewsScreen() {
           onEndReachedThreshold={0.5}
           onEndReached={() => setVisible((v) => Math.min(v + PAGE, posts.length))}
           ListHeaderComponent={
-            hasPro && posts.length ? (
+            posts.length ? (
               <View style={{ marginHorizontal: -16, marginTop: -16, marginBottom: 8 }}>
                 <Stories posts={posts} />
               </View>
             ) : null
           }
-          ListFooterComponent={hasPro === false ? <PaywallCard role="coach" uid={coach?.id} /> : null}
           ListEmptyComponent={
             <View style={styles.empty}>
               <View style={styles.emptyIcon}>

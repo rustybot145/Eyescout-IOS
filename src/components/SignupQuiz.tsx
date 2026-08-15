@@ -157,8 +157,10 @@ export function SignupQuiz() {
       // player's own feed personalization only.
       const res = await signUpPlayer({ ...rest, sport: rest.sports[0], birth_date });
       if (!res.ok) { setBusy(false); return setErr(res.error); }
-      // Sales funnel: land the brand-new player on the Pro offer (X → profile).
-      router.replace({ pathname: '/paywall', params: { role: 'player', from: 'signup' } });
+      // Used to drop the brand-new player onto the Pro offer. Nothing is sold
+      // now, so signup goes straight where that screen's X button went anyway.
+      toast("You're in — your profile is live");
+      router.replace('/(tabs)/profile');
     } else {
       const res = await signUpCoach(cf);
       if (!res.ok) { setBusy(false); return setErr(res.error); }

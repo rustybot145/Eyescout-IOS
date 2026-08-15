@@ -18,7 +18,6 @@ import {
   uploadToBucket, addOwnMedia, deleteDeliveredPhoto, deleteOwnMedia, deletePostById,
 } from '../../src/data/media';
 import { toast } from '../../src/components/Overlays';
-import { useProAccess } from '../../src/lib/useProAccess';
 import { hapticSuccess, hapticError } from '../../src/lib/haptics';
 import { supabase } from '../../src/lib/supabase';
 import { signOutEverywhere } from '../../src/lib/auth';
@@ -44,7 +43,6 @@ const mediaUri = (m: { url?: string; dataUrl?: string }) => m.url || m.dataUrl |
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { hasPro } = useProAccess();
   const [data, setData] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -94,16 +92,11 @@ export default function ProfileScreen() {
   // Add Photos — pick from library, upload to the SAME Supabase `posts` bucket the
   // web + admin use, then append to own_photos/own_clips (shows in Content).
   //
-  // Pro-only. Free players still get everything the ADMIN delivers to them
-  // (delivered_photos from a shoot) — this gates uploading your OWN media, which
-  // is the paid perk. `hasPro === null` means the check is still in flight, so we
-  // send them to the paywall rather than opening a picker whose upload may fail.
+  // Uploading your own media used to be the paid perk; it is free now. Players
+  // still also receive everything the ADMIN delivers from a shoot
+  // (delivered_photos), which was never gated.
   async function addPhotos() {
     if (!data) return;
-    if (!hasPro) {
-      router.push({ pathname: '/paywall', params: { role: 'player' } });
-      return;
-    }
     try {
       const picked = await pickMedia({ videos: true, multiple: true });
       if (!picked.length) return;
@@ -243,11 +236,7 @@ export default function ProfileScreen() {
               {uploading ? (
                 <ActivityIndicator size="small" color="rgba(255,255,255,0.75)" />
               ) : (
-                <Ionicons
-                  name={hasPro ? 'add' : 'lock-closed'}
-                  size={hasPro ? 17 : 14}
-                  color="rgba(255,255,255,0.75)"
-                />
+                <Ionicons name="add" size={17} color="rgba(255,255,255,0.75)" />
               )}
               <Text style={styles.btnOutlineText}>{uploading ? 'Uploading…' : 'Add Photos'}</Text>
             </Pressable>
@@ -282,11 +271,7 @@ export default function ProfileScreen() {
               <MediaGrid tiles={contentMedia} onPressItem={(i) => setViewer(contentMedia[i])} />
             ) : (
               <EmptyState
-                label={
-                  hasPro
-                    ? 'No content yet — tap Add Photos to upload.'
-                    : 'No content yet. Go Pro to upload your own photos and clips.'
-                }
+                label="No content yet — tap Add Photos to upload."
               />
             ))}
           {tab === 'posted' &&

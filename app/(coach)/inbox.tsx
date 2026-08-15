@@ -13,13 +13,10 @@ import { confirm, openReport } from '../../src/components/Overlays';
 import { CoachThread, ChatMsg, fetchCoachThreads, saveThread, deleteThread } from '../../src/data/messages';
 import { getCurrentCoach } from '../../src/data/coach';
 import { notifyNewMessage } from '../../src/data/notify';
-import { useProAccess } from '../../src/lib/useProAccess';
-import { PaywallScreen } from '../../src/components/Paywall';
 import { timeAgo, formatTime, formatDate } from '../../src/lib/format';
 
 export default function CoachInboxScreen() {
   const insets = useSafeAreaInsets();
-  const { hasPro } = useProAccess();
   const [coachId, setCoachId] = useState<string | null>(null);
   const [threads, setThreads] = useState<CoachThread[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -125,11 +122,6 @@ export default function CoachInboxScreen() {
         <ActivityIndicator color={colors.blue} />
       </View>
     );
-  }
-
-  // Coach messaging is a Pro feature.
-  if (hasPro === false) {
-    return <PaywallScreen role="coach" uid={coachId} title="Message athletes directly with Pro." />;
   }
 
   if (active) {

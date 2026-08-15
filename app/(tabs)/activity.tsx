@@ -10,8 +10,6 @@ import { fonts } from '../../src/theme/fonts';
 import { Notif, fetchNotifications, isFollowingActor, markAllRead } from '../../src/data/activity';
 import { toggleFollow } from '../../src/data/feed';
 import { getCurrentUserId } from '../../src/data/user';
-import { useProAccess } from '../../src/lib/useProAccess';
-import { PaywallScreen } from '../../src/components/Paywall';
 import { timeAgo } from '../../src/lib/format';
 
 type TabKey = 'all' | 'follows' | 'messages';
@@ -24,7 +22,6 @@ const TABS: { key: TabKey; label: string }[] = [
 export default function ActivityScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { hasPro } = useProAccess();
   const [uid, setUid] = useState<string | null>(null);
   const [items, setItems] = useState<Notif[]>([]);
   const [tab, setTab] = useState<TabKey>('all');
@@ -83,11 +80,6 @@ export default function ActivityScreen() {
     if (tab === 'messages') return n.type === 'message' || n.type === 'admin_message';
     return true;
   });
-
-  // Activity is a Pro feature.
-  if (hasPro === false) {
-    return <PaywallScreen role="player" uid={uid} title="See who's following you and who viewed your profile with Pro." />;
-  }
 
   return (
     <View style={styles.root}>

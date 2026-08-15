@@ -40,7 +40,62 @@ assert.ok(
 );
 console.log('identity switch + logout present in iap.ts');
 
-// ── 2. Every sign-out must go through the shared helper ─────────────────────
+// ── 2. Cancelling must go to the store, never fake it locally ───────────────
+// Apple requires a link to Manage Subscriptions (3.1.2) and gives no API to
+// cancel in-app. Writing status='cancelled' ourselves would stop billing in our
+// UI while the card kept getting charged.
+assert.ok(
+  iap.includes('export async function openManageSubscription'),
+  'iap.ts must expose openManageSubscription()',
+);
+assert.ok(
+  /managementURL/.test(iap) && /apps\.apple\.com\/account\/subscriptions/.test(iap),
+  'cancel must open the store page — RevenueCat managementURL with a platform fallback',
+);
+
+const settings = read('app/settings.tsx');
+assert.ok(
+  settings.includes('openManageSubscription'),
+  'settings must offer the cancel path — it is the only place a user can reach it',
+);
+// Since 2026-08-15 nothing is sold, but people who subscribed BEFORE that are
+// still being billed by Apple until they cancel. The row that tells them so is
+// the only thing standing between them and a silent recurring charge for a
+// product everyone else now gets free — so it stays tested.
+assert.ok(
+  settings.includes('<LegacySubscriptionRow'),
+  'settings must render LegacySubscriptionRow — without it a legacy subscriber has no in-app way to cancel',
+);
+// Placement, checked in RENDER order — the component is declared below the
+// screen, so raw source positions say nothing about where it appears.
+assert.ok(
+  settings.indexOf('<LegacySubscriptionRow') < settings.indexOf('Profile Photo'),
+  'the legacy-subscriber notice belongs above the Profile Photo section, not buried at the bottom',
+);
+const legacyRow = settings.slice(settings.indexOf('function LegacySubscriptionRow'));
+assert.ok(
+  legacyRow.indexOf("You're still subscribed") < legacyRow.indexOf('Cancel Subscription'),
+  'the cancel button belongs under the explanation, not above it',
+);
+// It must key off the STORE, not our database: the subscriptions row can be
+// stale or missing while Apple is still charging.
+assert.ok(
+  /isProEntitled\(\)/.test(legacyRow) && !/getSubscription\(/.test(legacyRow),
+  'the row must read the store entitlement (isProEntitled), not the database row',
+);
+// And it must show for nobody else — every non-subscriber sees no trace of Pro.
+assert.ok(
+  /if \(!stillSubscribed\) return null;/.test(legacyRow),
+  'the row must render nothing at all for users with no live subscription',
+);
+// Nothing in the app may write a subscription status — only the webhook may.
+assert.ok(
+  !/from\('subscriptions'\)[\s\S]{0,80}\.(update|upsert|insert)/.test(settings),
+  'the app must never write subscriptions itself; the store is the source of truth',
+);
+console.log('legacy-subscriber cancel path intact: store-driven, above Profile Photo');
+
+// ── 3. Every sign-out must go through the shared helper ─────────────────────
 const auth = read('src/lib/auth.ts');
 assert.ok(
   auth.includes('export async function signOutEverywhere'),

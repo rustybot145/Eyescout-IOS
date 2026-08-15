@@ -1,45 +1,36 @@
-import { Platform } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import Purchases, { LOG_LEVEL } from 'react-native-purchases';
 import { toast } from '../components/Overlays';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EyeScout Sports Pro — Apple In-App Purchase (StoreKit) / Google Play Billing.
+// Store subscription plumbing — READ-ONLY as of 2026-08-15.
 //
-// Both stores REQUIRE digital subscriptions to go through their own billing —
-// PayPal / web checkout is rejected on iOS and violates Play's Payments policy.
-// RevenueCat (`react-native-purchases`) wraps StoreKit + Play Billing, validates
-// receipts server-side, and fires a webhook we point at the same Supabase that
-// already gates everything.
+// EyeScout Sports Pro is no longer sold. This app buys nothing: `purchasePro`,
+// `proPriceLabel` and `restorePro` are gone along with the paywall, and there is
+// no code path left that can open Apple's purchase sheet.
 //
-// This module is the single seam the UI talks to (`purchasePro`, `restorePro`).
+// WHY THE REVENUECAT SDK IS STILL HERE, rather than ripped out:
 //
-// ── KEYS ────────────────────────────────────────────────────────────────────
-// The RevenueCat *public* SDK keys are safe to ship in the binary (that is what
-// they are for), but they differ per platform. They are read from app.json →
-// expo.extra so a key rotation doesn't need a code change.
+//   1. People are still being charged. Anyone who subscribed before the switch
+//      keeps renewing through Apple until THEY cancel — removing a product from
+//      sale never cancels an existing subscriber. `isProEntitled()` is how the
+//      app knows to show that person the cancel link, and
+//      `openManageSubscription()` is the link. Deleting this file would leave a
+//      paying user with no way out from inside the app, which is both hostile
+//      and an Apple 3.1.2 problem.
+//   2. `configurePurchases()` / `logOutPurchases()` are identity, not sales.
+//      They stop one account's entitlement leaking to the next account on a
+//      shared phone (the bug fixed in 4367bce). Still needed while any live
+//      entitlement exists.
+//   3. Pulling a native module out is a real native-build change. Keeping it
+//      dormant costs nothing and makes turning Pro back on a UI job.
 //
-// ── GO LIVE (one-time, needs Ben's accounts) ────────────────────────────────
-//   1. Play Console → Monetize → Subscriptions → create `eyescout_sports_pro_monthly`
-//      ($15/mo). App Store Connect → same product id, auto-renewable.
-//   2. RevenueCat → project → add BOTH apps → attach each store product to one
-//      entitlement called `pro` → copy the two public SDK keys.
-//   3. Paste them into app.json → expo.extra.revenueCatIosKey / revenueCatAndroidKey.
-//   4. RevenueCat webhook → a Supabase function that writes the caller's
-//      `subscriptions` row (status active). The DB paywall then unlocks Pro
-//      automatically — same source of truth the web uses.
-//
-// Until step 3 is done, `isIapAvailable()` is false and the paywall says so
-// instead of showing a button that silently fails.
+// The public SDK keys are safe in the binary — that is what they are for — and
+// are read from app.json → expo.extra.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const PRO_PRODUCT_ID = 'eyescout_sports_pro_monthly';
 export const PRO_ENTITLEMENT_ID = 'pro';
-// Display fallback only. `proPriceLabel()` returns the store's own localized
-// price once RevenueCat is live — Play requires the real localized price.
-export const PRO_PRICE_LABEL = '$15';
-
-export type PurchaseResult = 'success' | 'cancelled' | 'unavailable' | 'error';
 
 const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, string | undefined>;
 const SDK_KEY = Platform.select({
@@ -98,89 +89,19 @@ export async function logOutPurchases(): Promise<void> {
   currentAppUserId = null;
 }
 
-// The store's localized price string (e.g. "£12.99"), falling back to the
-// hardcoded label if the offering can't be read.
-export async function proPriceLabel(): Promise<string> {
-  if (!isIapAvailable()) return PRO_PRICE_LABEL;
-  try {
-    const offerings = await Purchases.getOfferings();
-    return offerings.current?.availablePackages?.[0]?.product?.priceString || PRO_PRICE_LABEL;
-  } catch {
-    return PRO_PRICE_LABEL;
-  }
-}
-
-// Kick off the native purchase sheet for Pro. Returns how it ended so the
-// checkout screen can play the unlock reveal on success.
-// Why the last purchase attempt failed, in words, for the UI to show inline.
-// Every failure here used to report ONLY via toast(), and toasts fired from a
-// screen presented with presentation:'modal' were invisible — so all four
-// failure modes looked identical to a button that did nothing. The UI now shows
-// this on the paywall itself, which cannot be swallowed by a presentation layer.
-export let lastPurchaseError = '';
-
-export async function purchasePro(): Promise<PurchaseResult> {
-  lastPurchaseError = '';
-  if (!isIapAvailable()) {
-    // Distinguishes the two very different causes: running in Expo Go (no
-    // billing module) vs a real build whose RevenueCat key never made it in.
-    lastPurchaseError = SDK_KEY
-      ? 'In-app purchases need a real build (not Expo Go).'
-      : 'Store key missing from this build — RevenueCat is not configured.';
-    toast(lastPurchaseError, 'err');
-    return 'unavailable';
-  }
-  try {
-    const offerings = await Purchases.getOfferings();
-    const pkg = offerings.current?.availablePackages?.[0];
-    if (!pkg) {
-      // The single most common setup miss: a product attached to an entitlement
-      // but never put in an Offering marked Current, so `current` is empty.
-      const all = Object.keys(offerings.all || {}).length;
-      lastPurchaseError = all
-        ? `Store returned ${all} offering(s) but none is set as Current in RevenueCat.`
-        : 'Store returned no offerings. Check the RevenueCat Offering and the App Store Paid Applications agreement.';
-      toast('Subscription unavailable right now', 'err');
-      return 'unavailable';
-    }
-    const { customerInfo } = await Purchases.purchasePackage(pkg);
-    if (customerInfo.entitlements.active[PRO_ENTITLEMENT_ID]) return 'success';
-    // Bought, but the entitlement did not come back — almost always the
-    // app-specific shared secret missing in RevenueCat, so the receipt can't
-    // be validated.
-    lastPurchaseError = 'Purchase completed but Pro did not unlock. Check the App-Specific Shared Secret in RevenueCat.';
-    toast(lastPurchaseError, 'err');
-    return 'error';
-  } catch (e: any) {
-    // RevenueCat sets userCancelled for a dismissed sheet — not an error state.
-    if (e?.userCancelled) return 'cancelled';
-    // RevenueCat puts the useful part in readableErrorCode and, for StoreKit
-    // failures, underlyingErrorMessage — `message` is often empty, which is why
-    // this read as a bare "could not be completed" with nothing to act on.
-    const parts = [
-      e?.readableErrorCode,
-      e?.code != null ? `code ${e.code}` : null,
-      e?.underlyingErrorMessage,
-      e?.message,
-    ].filter(Boolean);
-    lastPurchaseError = parts.length
-      ? String(parts.join(' · ')).slice(0, 300)
-      : 'Purchase could not be completed (store gave no reason)';
-    toast(lastPurchaseError, 'err');
-    return 'error';
-  }
-}
-
-// Does the store itself say this user is entitled to Pro right now?
+// Does the store still have a live subscription for this user?
 //
-// This is the receipt-backed truth: RevenueCat validates the Apple/Google receipt
-// on THEIR servers and caches the verdict in the SDK, so a purchase unlocks the
-// app the instant it completes — with no dependency on our webhook having landed
-// yet. `fetchHasPro()` ORs this with the database answer, which is what keeps a
-// paying user from staring at a paywall they already bought through.
+// This no longer gates anything — access is free. Its only job now is to spot a
+// LEGACY SUBSCRIBER: someone who bought Pro before the switch and whose Apple
+// subscription is still renewing. Settings uses it to show that person the
+// cancel link, and shows nothing to everyone else.
 //
-// Never throws: any failure (offline, SDK not configured) reads as "not entitled"
-// and we fall back to the DB, which is the durable cross-platform record.
+// Receipt-backed truth: RevenueCat validates the Apple receipt on their servers,
+// so this reflects what Apple is actually still billing — not what our database
+// happens to say.
+//
+// Never throws: any failure (offline, SDK not configured, Expo Go) reads as
+// "no live subscription", which correctly shows the row to nobody.
 export async function isProEntitled(): Promise<boolean> {
   if (!isIapAvailable()) return false;
   try {
@@ -191,19 +112,40 @@ export async function isProEntitled(): Promise<boolean> {
   }
 }
 
-// Both stores REQUIRE a "Restore Purchases" path on every subscription paywall.
-export async function restorePro(): Promise<PurchaseResult> {
-  if (!isIapAvailable()) {
-    toast('Subscriptions are not available in this build', 'err');
-    return 'unavailable';
+// Send the user to the store's own Manage Subscriptions page to cancel.
+//
+// There is no way to cancel an auto-renewing subscription from inside the app.
+// Apple and Google both refuse to expose an API for it — cancellation happens in
+// the store UI, on purpose, and Apple's Guideline 3.1.2 requires the app to link
+// there. Anything we "cancelled" locally would be a lie: the card still gets
+// charged next period.
+//
+// RevenueCat hands back the exact per-store URL (for Play it carries the sku and
+// package, landing on THIS subscription rather than the generic list). The
+// platform defaults are the fallback for when the SDK can't answer — Expo Go,
+// offline, or a user whose purchase was made outside this device.
+//
+// Afterwards Apple/Google notify RevenueCat, which posts CANCELLATION to our
+// webhook → `subscriptions.status = 'cancelled'` with `expires_at` untouched, so
+// access correctly runs to the end of the paid period on both web and mobile.
+export async function openManageSubscription(): Promise<void> {
+  let url =
+    Platform.OS === 'android'
+      ? 'https://play.google.com/store/account/subscriptions'
+      : 'https://apps.apple.com/account/subscriptions';
+
+  if (isIapAvailable()) {
+    try {
+      const info = await Purchases.getCustomerInfo();
+      if (info.managementURL) url = info.managementURL;
+    } catch {
+      // Keep the platform default — it reaches the right page either way.
+    }
   }
+
   try {
-    const info = await Purchases.restorePurchases();
-    if (info.entitlements.active[PRO_ENTITLEMENT_ID]) return 'success';
-    toast('Nothing to restore');
-    return 'error';
+    await Linking.openURL(url);
   } catch {
-    toast('Could not restore purchases', 'err');
-    return 'error';
+    toast('Could not open your store subscription settings', 'err');
   }
 }

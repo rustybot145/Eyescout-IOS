@@ -22,9 +22,10 @@ export default function RootLayout() {
     if (fontsLoaded || fontError) SplashScreen.hideAsync().catch(() => {});
   }, [fontsLoaded, fontError]);
 
-  // RevenueCat needs the signed-in user id so entitlements follow the account
-  // across devices (and so "Restore Purchases" can find them). No-ops until the
-  // SDK keys are set in app.json → extra.
+  // Identity only — nothing is sold any more. RevenueCat still needs the signed-in
+  // user id so a LEGACY subscriber's entitlement is attributed to the right
+  // account (Settings uses it to offer them the cancel link) and so one account's
+  // subscription never leaks to the next account on a shared phone.
   useEffect(() => {
     const apply = (userId?: string) => {
       if (userId) configurePurchases(userId).catch(() => {});
@@ -79,7 +80,6 @@ export default function RootLayout() {
             <Stack.Screen name="coach-pending" />
             <Stack.Screen name="player/[id]" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="create-post" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-            <Stack.Screen name="paywall" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
           </Stack>
         </ErrorBoundary>
         <OverlayHost />

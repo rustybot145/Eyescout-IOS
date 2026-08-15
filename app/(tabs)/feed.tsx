@@ -11,12 +11,10 @@ import { GradientText } from '../../src/components/GradientText';
 import { PostCard } from '../../src/components/PostCard';
 import { FeedSkeleton } from '../../src/components/Skeleton';
 import { Stories } from '../../src/components/Stories';
-import { PaywallCard } from '../../src/components/Paywall';
 import { openReport } from '../../src/components/Overlays';
 import { sharePost } from '../../src/lib/sharePost';
 import { hapticTap } from '../../src/lib/haptics';
 import { FeedPost, fetchFeed, toggleHype, toggleFollow } from '../../src/data/feed';
-import { fetchHasPro, fetchFeedPreview } from '../../src/data/subscription';
 import { getCurrentUser, CurrentUser } from '../../src/data/user';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -31,7 +29,6 @@ export default function FeedScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [hasPro, setHasPro] = useState<boolean | null>(null);
 
   // Which post is on screen → only that video plays (web's IntersectionObserver).
   const viewConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
@@ -45,11 +42,7 @@ export default function FeedScreen() {
     const user = me || (await getCurrentUser());
     if (user && !me) setMe(user);
     if (!user) return;
-    const pro = await fetchHasPro();
-    setHasPro(pro);
-    // Pro → the full feed; free → the DB-capped 2-post teaser.
-    const data = pro ? await fetchFeed(user.id, user.sport) : await fetchFeedPreview(user.id);
-    setPosts(data);
+    setPosts(await fetchFeed(user.id, user.sport));
     setVisible(PAGE);
   }, [me]);
 
@@ -152,13 +145,12 @@ export default function FeedScreen() {
           onEndReachedThreshold={0.5}
           onEndReached={() => setVisible((v) => Math.min(v + PAGE, posts.length))}
           ListHeaderComponent={
-            hasPro && posts.length ? (
+            posts.length ? (
               <View style={{ marginHorizontal: -16, marginTop: -16, marginBottom: 8 }}>
                 <Stories posts={posts} />
               </View>
             ) : null
           }
-          ListFooterComponent={hasPro === false ? <PaywallCard role="player" uid={me?.id} /> : null}
           ListEmptyComponent={<EmptyFeed />}
           removeClippedSubviews
           initialNumToRender={PAGE}

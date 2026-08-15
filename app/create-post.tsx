@@ -16,8 +16,6 @@ import {
 } from '../src/data/media';
 import { getCurrentUser, CurrentUser } from '../src/data/user';
 import { toast } from '../src/components/Overlays';
-import { useProAccess } from '../src/lib/useProAccess';
-import { PaywallScreen } from '../src/components/Paywall';
 
 const GAP = 8;
 const H_PAD = 16;
@@ -31,7 +29,6 @@ type Selected = { uri: string; kind: 'photo' | 'video'; needsUpload: boolean; mi
 export default function CreatePostScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { hasPro } = useProAccess();
   const [me, setMe] = useState<CurrentUser | null>(null);
   const [media, setMedia] = useState<PickableMedia[]>([]);
   const [loadingMedia, setLoadingMedia] = useState(true);
@@ -92,18 +89,6 @@ export default function CreatePostScreen() {
       toast(err?.message || 'Post failed', 'err');
       setPosting(false);
     }
-  }
-
-  // Posting to the feed is a Pro feature.
-  if (hasPro === false) {
-    return (
-      <PaywallScreen
-        role="player"
-        uid={me?.id}
-        title="Share your photos and highlights to the feed with Pro."
-        onClose={() => router.back()}
-      />
-    );
   }
 
   if (done) {
