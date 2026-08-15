@@ -17,10 +17,12 @@ export type Coach = {
   profilePhoto: string | null;
   bannerPhoto: string | null;
   verified: boolean;
+  // Same JSONB blob the web writes; holds the notif_* email opt-outs.
+  prefs: Record<string, any>;
 };
 
 const SEL_COACH =
-  'id, athlete_first, athlete_last, title, sport, school, division, bio, profile_photo, banner_photo, verified, role';
+  'id, athlete_first, athlete_last, title, sport, school, division, bio, profile_photo, banner_photo, verified, role, prefs';
 
 function rowToCoach(r: any): Coach {
   return {
@@ -35,6 +37,7 @@ function rowToCoach(r: any): Coach {
     profilePhoto: r.profile_photo || null,
     bannerPhoto: r.banner_photo || null,
     verified: !!r.verified,
+    prefs: r.prefs || {},
   };
 }
 

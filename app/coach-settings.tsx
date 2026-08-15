@@ -8,7 +8,7 @@ import { colors, gradient } from '../src/theme/colors';
 import { fonts } from '../src/theme/fonts';
 import { GradientText } from '../src/components/GradientText';
 import { GradientButton } from '../src/components/GradientButton';
-import { TextField, FieldLabel } from '../src/components/fields';
+import { TextField, FieldLabel, ToggleRow } from '../src/components/fields';
 import { Select } from '../src/components/Select';
 import { COACH_SPORTS, DIVISIONS, TITLES } from '../src/theme/options';
 import { Coach, getCurrentCoach, updateCoachProfile } from '../src/data/coach';
@@ -39,6 +39,12 @@ export default function CoachSettingsScreen() {
   function set<K extends keyof Coach>(key: K, val: Coach[K]) {
     setC((prev) => (prev ? { ...prev, [key]: val } : prev));
   }
+  function setPref(key: string, val: boolean) {
+    setC((prev) => (prev ? { ...prev, prefs: { ...prev.prefs, [key]: val } } : prev));
+  }
+  // Absent means ON — only an explicit false stops an email. Same rule the web
+  // Settings pages and the notify-email edge function apply.
+  const notifOn = (key: string) => c?.prefs?.[key] !== false;
 
   async function changeImage(kind: 'avatar' | 'banner') {
     if (!c) return;
@@ -72,6 +78,7 @@ export default function CoachSettingsScreen() {
       school: c.school || null,
       division: c.division || null,
       bio: c.bio || null,
+      prefs: c.prefs || {},
     };
     const { error } = await updateCoachProfile(c.id, patch);
     setSaving(false);
@@ -159,6 +166,22 @@ export default function CoachSettingsScreen() {
         {/* Bio */}
         <Section title="About">
           <TextField value={c.bio} onChangeText={(v) => set('bio', v)} placeholder="Tell athletes about your program…" multiline style={styles.bio} />
+        </Section>
+
+        {/* Email Notifications — the two types a COACH can receive. coach_follow
+            is player-facing only, so it deliberately has no row here. */}
+        <Section title="Email Notifications">
+          <ToggleRow
+            label="New messages"
+            value={notifOn('notif_message')}
+            onValueChange={(v) => setPref('notif_message', v)}
+          />
+          <ToggleRow
+            label="Messages from EyeScout"
+            value={notifOn('notif_admin_message')}
+            onValueChange={(v) => setPref('notif_admin_message', v)}
+            last
+          />
         </Section>
 
         <View style={{ height: 8 }} />

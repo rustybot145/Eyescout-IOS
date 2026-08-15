@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TextInputProps, StyleSheet, Pressable } from 'react-native';
+import { View, Text, TextInput, TextInputProps, StyleSheet, Pressable, Switch } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { fonts } from '../theme/fonts';
@@ -69,6 +69,33 @@ export function PasswordField(props: TextInputProps) {
   );
 }
 
+// Labelled switch row. Lives here rather than in a screen because both the
+// player and the coach Settings screens use it.
+export function ToggleRow({
+  label,
+  value,
+  onValueChange,
+  last,
+}: {
+  label: string;
+  value: boolean;
+  onValueChange: (v: boolean) => void;
+  last?: boolean;
+}) {
+  return (
+    <View style={[styles.toggleRow, !last && styles.toggleRowBorder]}>
+      <Text style={styles.toggleLabel}>{label}</Text>
+      <Switch
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={{ false: 'rgba(255,255,255,0.14)', true: 'rgba(30,144,255,0.6)' }}
+        thumbColor={value ? colors.blue : '#f4f4f4'}
+        ios_backgroundColor="rgba(255,255,255,0.14)"
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   label: {
     fontSize: 11.5,
@@ -106,4 +133,7 @@ const styles = StyleSheet.create({
   pwWrap: { position: 'relative', justifyContent: 'center' },
   pwField: { paddingRight: 44 },
   toggle: { position: 'absolute', right: 14, top: 0, bottom: 0, justifyContent: 'center' },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 13 },
+  toggleRowBorder: { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
+  toggleLabel: { color: colors.white, fontSize: 14, flex: 1, marginRight: 12 },
 });

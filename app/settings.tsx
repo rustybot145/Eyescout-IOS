@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, Pressable, Image, Switch, ActivityIndicator, AppState,
+  View, Text, ScrollView, StyleSheet, Pressable, Image, ActivityIndicator, AppState,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -10,7 +10,7 @@ import { colors, gradient } from '../src/theme/colors';
 import { fonts } from '../src/theme/fonts';
 import { GradientText } from '../src/components/GradientText';
 import { GradientButton } from '../src/components/GradientButton';
-import { TextField, FieldLabel } from '../src/components/fields';
+import { TextField, FieldLabel, ToggleRow } from '../src/components/fields';
 import { Select } from '../src/components/Select';
 import { GRAD_YEARS } from '../src/theme/options';
 import { fetchSettings, updateProfile, SettingsProfile } from '../src/data/settings';
@@ -49,6 +49,10 @@ export default function SettingsScreen() {
   function setPref(key: string, val: boolean) {
     setP((prev) => (prev ? { ...prev, prefs: { ...prev.prefs, [key]: val } } : prev));
   }
+  // Absent means ON — accounts that predate these toggles have no notif_* key and
+  // must keep getting their mail. Only an explicit false switches an email off,
+  // which is exactly the test the edge function applies.
+  const notifOn = (key: string) => p?.prefs?.[key] !== false;
 
   async function changePhoto() {
     if (!uid) return;
@@ -220,11 +224,31 @@ export default function SettingsScreen() {
           />
         </Section>
 
-        {/* Notifications — removed for the store release. These three switches
-            wrote prefs that nothing ever read: expo-notifications is not
-            installed, so no push is ever sent. Shipping toggles that silently do
-            nothing invites a "broken functionality" rejection on both stores.
-            Restore this Section once push is actually wired up. */}
+        {/* Email Notifications.
+            The old push toggles were pulled for the store release because
+            expo-notifications isn't installed and nothing read the prefs. These
+            are different: each row maps 1:1 onto a type the notify-email edge
+            function actually sends (message | coach_follow | admin_message), it
+            reads profiles.prefs, and the same keys back the web Settings page.
+            Still no push — the labels say email so nothing here overpromises. */}
+        <Section title="Email Notifications">
+          <ToggleRow
+            label="New messages"
+            value={notifOn('notif_message')}
+            onValueChange={(v) => setPref('notif_message', v)}
+          />
+          <ToggleRow
+            label="When a coach follows you"
+            value={notifOn('notif_coach_follow')}
+            onValueChange={(v) => setPref('notif_coach_follow', v)}
+          />
+          <ToggleRow
+            label="Messages from EyeScout"
+            value={notifOn('notif_admin_message')}
+            onValueChange={(v) => setPref('notif_admin_message', v)}
+            last
+          />
+        </Section>
 
         {/* Privacy */}
         <Section title="Privacy">
@@ -382,31 +406,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function ToggleRow({
-  label,
-  value,
-  onValueChange,
-  last,
-}: {
-  label: string;
-  value: boolean;
-  onValueChange: (v: boolean) => void;
-  last?: boolean;
-}) {
-  return (
-    <View style={[styles.toggleRow, !last && styles.toggleRowBorder]}>
-      <Text style={styles.toggleLabel}>{label}</Text>
-      <Switch
-        value={value}
-        onValueChange={onValueChange}
-        trackColor={{ false: 'rgba(255,255,255,0.14)', true: 'rgba(30,144,255,0.6)' }}
-        thumbColor={value ? colors.blue : '#f4f4f4'}
-        ios_backgroundColor="rgba(255,255,255,0.14)"
-      />
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   center: { alignItems: 'center', justifyContent: 'center' },
@@ -440,11 +439,6 @@ const styles = StyleSheet.create({
   grid2: { flexDirection: 'row', gap: 12 },
   gridCol: { flex: 1 },
   bio: { minHeight: 96, textAlignVertical: 'top', paddingTop: 13 },
-  toggleRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 13,
-  },
-  toggleRowBorder: { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
-  toggleLabel: { color: colors.white, fontSize: 14, flex: 1, marginRight: 12 },
   accountRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 15,
     borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)',
