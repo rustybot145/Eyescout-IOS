@@ -21,6 +21,7 @@ import { toast } from '../../src/components/Overlays';
 import { useProAccess } from '../../src/lib/useProAccess';
 import { hapticSuccess, hapticError } from '../../src/lib/haptics';
 import { supabase } from '../../src/lib/supabase';
+import { signOutEverywhere } from '../../src/lib/auth';
 
 // A grid item plus where it lives, so the owner can delete the right thing.
 type MediaSource =
@@ -86,7 +87,7 @@ export default function ProfileScreen() {
   }, [load]);
 
   async function signOut() {
-    await supabase.auth.signOut();
+    await signOutEverywhere();
     router.replace('/');
   }
 

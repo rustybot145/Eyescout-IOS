@@ -23,6 +23,7 @@ import { deleteAccountFlow } from '../src/lib/account';
 import { openTerms, openPrivacy, openSupport } from '../src/lib/legal';
 import { getSubscription } from '../src/data/subscription';
 import { supabase } from '../src/lib/supabase';
+import { signOutEverywhere } from '../src/lib/auth';
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
@@ -99,7 +100,7 @@ export default function SettingsScreen() {
   }
 
   async function signOut() {
-    await supabase.auth.signOut();
+    await signOutEverywhere();
     router.replace('/');
   }
 

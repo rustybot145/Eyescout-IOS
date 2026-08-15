@@ -11,6 +11,7 @@ import { Orbs } from '../src/components/Orbs';
 import { getCurrentCoach, refreshCoachVerified } from '../src/data/coach';
 import { toast } from '../src/components/Overlays';
 import { supabase } from '../src/lib/supabase';
+import { signOutEverywhere } from '../src/lib/auth';
 
 export default function CoachPendingScreen() {
   const insets = useSafeAreaInsets();
@@ -45,7 +46,7 @@ export default function CoachPendingScreen() {
   }
 
   async function signOut() {
-    await supabase.auth.signOut();
+    await signOutEverywhere();
     router.replace('/');
   }
 

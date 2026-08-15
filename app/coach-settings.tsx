@@ -18,6 +18,7 @@ import { toast } from '../src/components/Overlays';
 import { deleteAccountFlow } from '../src/lib/account';
 import { openTerms, openPrivacy, openSupport } from '../src/lib/legal';
 import { supabase } from '../src/lib/supabase';
+import { signOutEverywhere } from '../src/lib/auth';
 
 export default function CoachSettingsScreen() {
   const insets = useSafeAreaInsets();
@@ -79,7 +80,7 @@ export default function CoachSettingsScreen() {
   }
 
   async function signOut() {
-    await supabase.auth.signOut();
+    await signOutEverywhere();
     router.replace('/');
   }
 

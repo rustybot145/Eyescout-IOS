@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { logOutPurchases } from './iap';
 
 // Auth helpers, ported from the web portal's login.html handlers. Same Supabase
 // Auth calls, same role-guard behaviour, same deliberately-vague error copy.
@@ -113,7 +114,7 @@ export async function signIn(email: string, password: string, expectedRole: 'pla
 
   const actualRole = (profile?.role || 'player') as 'player' | 'coach';
   if (actualRole !== expectedRole) {
-    await supabase.auth.signOut().catch(() => {});
+    await signOutEverywhere();
     return {
       ok: false,
       error: actualRole === 'coach' ? 'That’s a coach account — sign in on the Coach tab.' : 'That’s a player account — sign in on the Player tab.',
@@ -121,6 +122,17 @@ export async function signIn(email: string, password: string, expectedRole: 'pla
   }
 
   return { ok: true, role: actualRole, verified: profile?.verified };
+}
+
+// The ONLY way the app should sign out. Six screens used to call
+// supabase.auth.signOut() directly and none of them detached RevenueCat, so the
+// device kept the previous account's entitlements and the next person to log in
+// on the same phone got Pro for free. Routing every exit through here means a
+// new sign-out button cannot reintroduce that.
+export async function signOutEverywhere(): Promise<void> {
+  // Before Supabase, while the SDK still knows who is leaving.
+  await logOutPurchases().catch(() => {});
+  await supabase.auth.signOut().catch(() => {});
 }
 
 // (signInAny was removed — the login screen now has a Player/Coach tab switcher

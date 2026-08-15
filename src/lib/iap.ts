@@ -56,13 +56,46 @@ export function isIapAvailable(): boolean {
 }
 
 let configured = false;
+// Which account the RevenueCat SDK currently believes it is. Tracked because
+// configure() can only run once per process, so switching accounts has to go
+// through logIn() instead.
+let currentAppUserId: string | null = null;
 
-// Call once after the user logs in. Safe to call repeatedly.
+// Called on every auth change. Configures once, then switches identity.
+//
+// This used to bail out whenever `configured` was true, which meant the SDK
+// kept the FIRST account that signed in on this device for the rest of the
+// process. Sign out, sign in as someone else, and RevenueCat still reported the
+// first user's entitlements — so a second account on the same phone inherited
+// Pro that it never paid for.
 export async function configurePurchases(userId: string): Promise<void> {
-  if (!isIapAvailable() || configured) return;
-  Purchases.setLogLevel(__DEV__ ? LOG_LEVEL.DEBUG : LOG_LEVEL.ERROR);
-  await Purchases.configure({ apiKey: SDK_KEY!, appUserID: userId || undefined });
-  configured = true;
+  if (!isIapAvailable() || !userId) return;
+
+  if (!configured) {
+    Purchases.setLogLevel(__DEV__ ? LOG_LEVEL.DEBUG : LOG_LEVEL.ERROR);
+    await Purchases.configure({ apiKey: SDK_KEY!, appUserID: userId });
+    configured = true;
+    currentAppUserId = userId;
+    return;
+  }
+
+  if (currentAppUserId !== userId) {
+    await Purchases.logIn(userId);
+    currentAppUserId = userId;
+  }
+}
+
+// Detach the device from the account on sign-out, so the next account starts
+// anonymous instead of inheriting these entitlements. Must be called BEFORE the
+// Supabase sign-out, while we still know who is leaving.
+export async function logOutPurchases(): Promise<void> {
+  if (!isIapAvailable() || !configured) return;
+  try {
+    await Purchases.logOut();
+  } catch {
+    // Throws if the current user is already anonymous — nothing to detach.
+  }
+  currentAppUserId = null;
 }
 
 // The store's localized price string (e.g. "£12.99"), falling back to the

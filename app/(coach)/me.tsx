@@ -10,6 +10,7 @@ import { GradientText } from '../../src/components/GradientText';
 import { Coach, getCurrentCoach } from '../../src/data/coach';
 import { fetchHasPro } from '../../src/data/subscription';
 import { supabase } from '../../src/lib/supabase';
+import { signOutEverywhere } from '../../src/lib/auth';
 
 export default function CoachProfileScreen() {
   const insets = useSafeAreaInsets();
@@ -45,7 +46,7 @@ export default function CoachProfileScreen() {
   }, [load]);
 
   async function signOut() {
-    await supabase.auth.signOut();
+    await signOutEverywhere();
     router.replace('/');
   }
 
