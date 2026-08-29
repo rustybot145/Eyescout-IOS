@@ -11,7 +11,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.eyescoutsports.mobile",
+      "bundleIdentifier": "com.eyescoutsports.app",
       "buildNumber": "1",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
@@ -29,8 +29,7 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_MEDIA_VIDEO",
-        "com.android.vending.BILLING"
+        "android.permission.READ_MEDIA_VIDEO"
       ],
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO",
@@ -64,8 +63,6 @@
       ]
     ],
     "extra": {
-      "revenueCatIosKey": "appl_XmnMGmHcLZZOZfPGZpJSBMPszQk",
-      "revenueCatAndroidKey": "",
       "router": {},
       "eas": {
         "projectId": "861e6965-bc7f-4c61-a845-67c873fcb294"

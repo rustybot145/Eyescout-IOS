@@ -41,16 +41,62 @@ function friendlyError(msg: string): string {
   return msg;
 }
 
+// With Supabase's "Confirm email" setting ON, signUp returns a user but NO
+// session, so the profile row cannot be inserted here — it would run as anon and
+// RLS would reject it. Park the row in user_metadata (it rides in the JWT, so it
+// survives confirming on a different device) and let ensureProfile() insert it on
+// the first successful sign-in. Same trick the web portal uses in login.html.
+//
+// Without this the account is created in auth but never in `profiles`, and the
+// role guard below then reads no row, assumes 'player', and permanently refuses
+// every coach that signed up on mobile.
+async function signUpWith(email: string, password: string, profileRow: Record<string, any>): Promise<
+  { ok: true; needsConfirm: boolean } | { ok: false; error: string }
+> {
+  // No emailRedirectTo here on purpose. It was tried, and it reaches the email
+  // template only as {{ .RedirectTo }} — a variable Supabase's Go template does
+  // not define, which made every confirmation email fail to render and silently
+  // never send. Returning mobile users to the app is handled on the web side
+  // instead: login.html detects iOS after confirming and offers `eyescout://`.
+  const { data, error } = await supabase.auth.signUp({
+    email, password, options: { data: { es_signup: profileRow } },
+  });
+  if (error) return { ok: false, error: friendlyError(error.message) };
+  if (!data.user) return { ok: false, error: 'We could not create your account. Please try again.' };
+  if (!data.session) return { ok: true, needsConfirm: true };
+
+  const { error: insertError } = await insertProfile(data.user.id, profileRow);
+  if (insertError) return { ok: false, error: 'We could not create your profile. Please try again.' };
+  return { ok: true, needsConfirm: false };
+}
+
+async function insertProfile(id: string, row: Record<string, any>): Promise<{ error: any }> {
+  const { error } = await supabase.from('profiles').insert({ ...row, id });
+  // 23505 = the row is already there (the web confirm handler beat us to it).
+  if (error && error.code === '23505') return { error: null };
+  if (!error) {
+    // profiles holds this now, so drop the copy. It carries a minor's phone, zip
+    // and parent contact details, and user_metadata lives in auth.users forever.
+    supabase.auth.updateUser({ data: { es_signup: null } }).then(undefined, () => {});
+  }
+  return { error };
+}
+
+// Creates the profile row a confirm-email signup could not write. No-op when the
+// row already exists or there is nothing parked in user_metadata. Exported
+// because the entry screen also needs it: a session arriving via the eyescout://
+// deep link (from the email-confirm page) belongs to an account whose row may
+// not exist yet.
+export async function ensureProfile(user: { id: string; user_metadata?: Record<string, any> | null }): Promise<void> {
+  const pending = user.user_metadata?.es_signup;
+  if (pending) await insertProfile(user.id, pending);
+}
+
+const CONFIRM_NOTICE = 'Please check your email to confirm your account before signing in.';
+
 export async function signUpPlayer(f: PlayerSignup): Promise<AuthResult> {
   const email = f.email.toLowerCase().trim();
-  const { data, error } = await supabase.auth.signUp({ email, password: f.password });
-  if (error) return { ok: false, error: friendlyError(error.message) };
-  if (!data.session || !data.user) {
-    return { ok: false, error: 'Please check your email to confirm your account before signing in.' };
-  }
-
-  const { error: insertError } = await supabase.from('profiles').insert({
-    id: data.user.id,
+  const res = await signUpWith(email, f.password, {
     email,
     athlete_first: f.athlete_first.trim(),
     athlete_last: f.athlete_last.trim(),
@@ -68,21 +114,14 @@ export async function signUpPlayer(f: PlayerSignup): Promise<AuthResult> {
     zip: f.zip.trim(),
     role: 'player',
   });
-  if (insertError) return { ok: false, error: 'We could not create your profile. Please try again.' };
-
+  if (!res.ok) return res;
+  if (res.needsConfirm) return { ok: false, error: CONFIRM_NOTICE };
   return { ok: true, role: 'player' };
 }
 
 export async function signUpCoach(f: CoachSignup): Promise<AuthResult> {
   const email = f.email.toLowerCase().trim();
-  const { data, error } = await supabase.auth.signUp({ email, password: f.password });
-  if (error) return { ok: false, error: friendlyError(error.message) };
-  if (!data.session || !data.user) {
-    return { ok: false, error: 'Please check your email to confirm your account before signing in.' };
-  }
-
-  const { error: insertError } = await supabase.from('profiles').insert({
-    id: data.user.id,
+  const res = await signUpWith(email, f.password, {
     email,
     athlete_first: f.first.trim(),
     athlete_last: f.last.trim(),
@@ -93,8 +132,8 @@ export async function signUpCoach(f: CoachSignup): Promise<AuthResult> {
     verified: false,
     role: 'coach',
   });
-  if (insertError) return { ok: false, error: 'We could not create your account. Please try again.' };
-
+  if (!res.ok) return res;
+  if (res.needsConfirm) return { ok: false, error: CONFIRM_NOTICE };
   return { ok: true, role: 'coach', verified: false };
 }
 
@@ -106,13 +145,27 @@ export async function signIn(email: string, password: string, expectedRole: 'pla
   const { data: authData, error } = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
   if (error) return { ok: false, error: 'Incorrect email or password.' };
 
-  const { data: profile } = await supabase
+  const readProfile = () => supabase
     .from('profiles')
     .select('id, role, verified')
     .eq('id', authData.user.id)
     .single();
 
-  const actualRole = (profile?.role || 'player') as 'player' | 'coach';
+  let { data: profile } = await readProfile();
+  if (!profile) {
+    // First sign-in after confirming an email — the row is still parked in
+    // user_metadata. Write it now, then read it back.
+    await ensureProfile(authData.user);
+    ({ data: profile } = await readProfile());
+  }
+  if (!profile) {
+    // No row and nothing to recover it from. Guessing a role here is what used
+    // to tell coaches they had a player account and lock them out for good.
+    await signOutEverywhere();
+    return { ok: false, error: 'We could not finish setting up your account. Please contact support.' };
+  }
+
+  const actualRole = profile.role as 'player' | 'coach';
   if (actualRole !== expectedRole) {
     await signOutEverywhere();
     return {
