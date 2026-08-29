@@ -34,7 +34,12 @@ export type CoachSignup = {
   password: string;
 };
 
-export type AuthResult = { ok: true; role: 'player' | 'coach'; verified?: boolean } | { ok: false; error: string };
+export type AuthResult =
+  | { ok: true; role: 'player' | 'coach'; verified?: boolean }
+  // Signup succeeded but Supabase's "Confirm email" gate is on: no session until
+  // the link is tapped. The quiz shows its waiting screen off this, not an error.
+  | { ok: false; needsConfirm: true; email: string }
+  | { ok: false; error: string };
 
 function friendlyError(msg: string): string {
   if (/already registered/i.test(msg)) return 'An account with this email already exists.';
@@ -92,8 +97,6 @@ export async function ensureProfile(user: { id: string; user_metadata?: Record<s
   if (pending) await insertProfile(user.id, pending);
 }
 
-const CONFIRM_NOTICE = 'Please check your email to confirm your account before signing in.';
-
 export async function signUpPlayer(f: PlayerSignup): Promise<AuthResult> {
   const email = f.email.toLowerCase().trim();
   const res = await signUpWith(email, f.password, {
@@ -115,7 +118,7 @@ export async function signUpPlayer(f: PlayerSignup): Promise<AuthResult> {
     role: 'player',
   });
   if (!res.ok) return res;
-  if (res.needsConfirm) return { ok: false, error: CONFIRM_NOTICE };
+  if (res.needsConfirm) return { ok: false, needsConfirm: true, email };
   return { ok: true, role: 'player' };
 }
 
@@ -133,7 +136,7 @@ export async function signUpCoach(f: CoachSignup): Promise<AuthResult> {
     role: 'coach',
   });
   if (!res.ok) return res;
-  if (res.needsConfirm) return { ok: false, error: CONFIRM_NOTICE };
+  if (res.needsConfirm) return { ok: false, needsConfirm: true, email };
   return { ok: true, role: 'coach', verified: false };
 }
 
@@ -143,7 +146,14 @@ export async function signUpCoach(f: CoachSignup): Promise<AuthResult> {
 export async function signIn(email: string, password: string, expectedRole: 'player' | 'coach'): Promise<AuthResult> {
   const cleanEmail = email.toLowerCase().trim();
   const { data: authData, error } = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
-  if (error) return { ok: false, error: 'Incorrect email or password.' };
+  if (error) {
+    // GoTrue says "Email not confirmed" — telling that person their password is
+    // wrong sends them to reset it, which cannot help. Name the real problem.
+    if (/not confirmed/i.test(error.message)) {
+      return { ok: false, error: 'Please confirm your email first — tap the link we sent you, then log in.' };
+    }
+    return { ok: false, error: 'Incorrect email or password.' };
+  }
 
   const readProfile = () => supabase
     .from('profiles')

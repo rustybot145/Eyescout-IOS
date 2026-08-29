@@ -32,6 +32,7 @@ import { SportMultiSelect } from './SportMultiSelect';
 import { TextField, PasswordField, FieldLabel, ErrorMsg } from './fields';
 import { SPORTS, COACH_SPORTS, GRAD_YEARS, DIVISIONS, TITLES, BIRTH_MONTHS, BIRTH_DAYS, BIRTH_YEARS } from '../theme/options';
 import { signUpPlayer, signUpCoach, signIn, forgotPassword } from '../lib/auth';
+import { supabase } from '../lib/supabase';
 import { RoleSwitch } from './RoleSwitch';
 import { toast } from './Overlays';
 
@@ -112,6 +113,12 @@ export function SignupQuiz() {
     backgroundColor: interpolateColor(bgFade.value, [0, 1], ['#000000', colors.bg]),
   }));
 
+  const [agree13, setAgree13] = useState(false);
+  // Set when signup succeeded but the email is unconfirmed — swaps the quiz for
+  // the "check your email" screen, credentials held so it can sign in the moment
+  // the link is tapped.
+  const [waiting, setWaiting] = useState<null | { email: string; password: string; role: Role }>(null);
+
   function validateStep(): string {
     if (role === 'player') {
       switch (step) {
@@ -130,7 +137,11 @@ export function SignupQuiz() {
           return isEmail(pf.parent_email) ? '' : 'Please enter a valid parent email.';
         case 6:
           if (pf.password.length < 8) return 'Password must be at least 8 characters.';
-          return pf.password === pf.confirm ? '' : 'Passwords do not match.';
+          if (pf.password !== pf.confirm) return 'Passwords do not match.';
+          // Same gate the web signup enforces, in the same words. The birthday
+          // step already computes the age; this is the athlete's explicit
+          // attestation on top of it, which our App Review notes promise.
+          return agree13 ? '' : 'Please confirm you are 13 or older.';
       }
     } else {
       switch (step) {
@@ -156,14 +167,22 @@ export function SignupQuiz() {
       // this single column; `sports` (both picks) is additive, for the
       // player's own feed personalization only.
       const res = await signUpPlayer({ ...rest, sport: rest.sports[0], birth_date });
-      if (!res.ok) { setBusy(false); return setErr(res.error); }
+      if (!res.ok) {
+        setBusy(false);
+        if ('needsConfirm' in res) return setWaiting({ email: res.email, password: pf.password, role: 'player' });
+        return setErr(res.error);
+      }
       // Used to drop the brand-new player onto the Pro offer. Nothing is sold
       // now, so signup goes straight where that screen's X button went anyway.
       toast("You're in — your profile is live");
       router.replace('/(tabs)/profile');
     } else {
       const res = await signUpCoach(cf);
-      if (!res.ok) { setBusy(false); return setErr(res.error); }
+      if (!res.ok) {
+        setBusy(false);
+        if ('needsConfirm' in res) return setWaiting({ email: res.email, password: cf.password, role: 'coach' });
+        return setErr(res.error);
+      }
       toast('Account created — pending verification');
       router.replace('/coach-pending');
     }
@@ -191,6 +210,9 @@ export function SignupQuiz() {
 
   const lastStep = step === total - 1;
   const cta = lastStep ? (role === 'coach' ? 'Create Coach Account' : 'Create Profile') : 'Continue';
+
+  /* ── Waiting for the confirmation email to be tapped ── */
+  if (waiting) return <ConfirmEmailView {...waiting} onBack={() => setWaiting(null)} />;
 
   /* ── Login view (returning users) ── */
   if (login) return <LoginView onBack={() => setLogin(false)} />;
@@ -356,6 +378,22 @@ export function SignupQuiz() {
             <Step q="Secure your account" s="Almost there — set a password.">
               <Field label="Password"><PasswordField placeholder="Min. 8 characters" value={pf.password} onChangeText={setP('password')} /></Field>
               <Field label="Confirm Password" last><PasswordField placeholder="Re-enter password" value={pf.confirm} onChangeText={setP('confirm')} /></Field>
+              <Pressable
+                style={styles.agreeRow}
+                onPress={() => setAgree13(!agree13)}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: agree13 }}
+                accessibilityLabel="I confirm I am 13 years of age or older"
+              >
+                <Ionicons
+                  name={agree13 ? 'checkbox' : 'square-outline'}
+                  size={22}
+                  color={agree13 ? '#1E90FF' : colors.muted}
+                />
+                <Text style={styles.agreeText}>
+                  I confirm I am <Text style={styles.agreeStrong}>13 years of age or older</Text>.
+                </Text>
+              </Pressable>
             </Step>
           );
       }
@@ -409,6 +447,100 @@ export function SignupQuiz() {
 // `signIn` enforces it: a coach's credentials on the Player tab are rejected
 // with a message telling them to switch, rather than silently logging them into
 // the wrong side of the app.
+// Shown after signup while the confirmation email sits unopened — the mobile
+// twin of the web's confirm-email.html waiting page. Two ways forward, both
+// automatic where possible:
+//   • Same phone: the email link opens login.html in Safari, which verifies and
+//     bounces back via eyescout:// with the session — Entry adopts it and this
+//     screen simply unmounts. Nothing here has to do anything.
+//   • Confirmed elsewhere (laptop, parent's phone): the poll below retries a
+//     real sign-in every few seconds and walks them in the moment it succeeds.
+function ConfirmEmailView({ email, password, role, onBack }: {
+  email: string; password: string; role: Role; onBack: () => void;
+}) {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const [note, setNote] = useState('');
+  const [cooldown, setCooldown] = useState(0);
+  const checking = useRef(false);
+
+  const enter = React.useCallback(async (): Promise<boolean> => {
+    if (checking.current) return false;
+    checking.current = true;
+    try {
+      // The deep-link bounce may have signed us in already; don't fight it.
+      const { data: sess } = await supabase.auth.getSession();
+      if (sess.session) return true; // Entry's listener routes; we just stop.
+      const res = await signIn(email, password, role);
+      if (res.ok) {
+        if (role === 'coach') router.replace(res.verified ? '/scout' : '/coach-pending');
+        else router.replace('/feed');
+        return true;
+      }
+      return false;
+    } finally {
+      checking.current = false;
+    }
+  }, [email, password, role, router]);
+
+  useEffect(() => {
+    // 8s, capped at ~5 minutes: the deep-link bounce is the primary path and
+    // needs no polling at all; this is only for "confirmed on another device",
+    // and a tighter loop of failed password grants would court GoTrue's
+    // per-IP rate limit — whose 429 lands on the login endpoint we need working.
+    let n = 0;
+    const id = setInterval(() => { if (++n > 40) return clearInterval(id); void enter(); }, 8000);
+    return () => clearInterval(id);
+  }, [enter]);
+
+  useEffect(() => {
+    if (!cooldown) return;
+    const id = setTimeout(() => setCooldown(cooldown - 1), 1000);
+    return () => clearTimeout(id);
+  }, [cooldown]);
+
+  async function resend() {
+    if (cooldown) return;
+    setCooldown(60);
+    const { error } = await supabase.auth.resend({ type: 'signup', email });
+    setNote(error ? 'Could not resend just now — try again in a minute.' : 'Sent — check your inbox.');
+  }
+
+  async function manualCheck() {
+    setNote('');
+    if (!(await enter())) setNote("Not confirmed yet — tap the link in your email first.");
+  }
+
+  return (
+    <View style={[styles.root, { backgroundColor: colors.bg }]}>
+      <View style={[styles.container, { paddingTop: insets.top + 72, paddingBottom: insets.bottom + 24, alignItems: 'center' }]}>
+        <Animated.View entering={FadeIn.duration(400)} style={{ alignItems: 'center' }}>
+          <Ionicons name="mail-unread-outline" size={54} color="#1E90FF" style={{ marginBottom: 18 }} />
+          <Text style={[styles.bigQ, { textAlign: 'center' }]}>Check your email</Text>
+          <Text style={[styles.sub, { textAlign: 'center', marginTop: 10 }]}>
+            We sent a confirmation link to
+          </Text>
+          <Text style={styles.confirmEmail}>{email}</Text>
+          <Text style={[styles.sub, { textAlign: 'center', marginTop: 14, lineHeight: 22 }]}>
+            Tap the link and we'll sign you in automatically — keep this screen open.
+          </Text>
+          <View style={{ height: 28 }} />
+          <GradientButton label="I've confirmed — let's go" onPress={manualCheck} />
+          {note ? <Text style={styles.confirmNote}>{note}</Text> : null}
+          <Pressable onPress={resend} disabled={!!cooldown} style={{ marginTop: 22 }}>
+            <Text style={[styles.forgot, cooldown ? { opacity: 0.45 } : null]}>
+              {cooldown ? `Resend email (${cooldown}s)` : 'Resend email'}
+            </Text>
+          </Pressable>
+          <Pressable onPress={onBack} style={{ marginTop: 14 }}>
+            <Text style={styles.forgot}>Wrong email? Go back</Text>
+          </Pressable>
+        </Animated.View>
+      </View>
+    </View>
+  );
+}
+
 function LoginView({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -423,7 +555,7 @@ function LoginView({ onBack }: { onBack: () => void }) {
     setBusy(true);
     const res = await signIn(email, password, role);
     setBusy(false);
-    if (!res.ok) return setErr(res.error);
+    if (!res.ok) return setErr('error' in res ? res.error : 'Please confirm your email first.');
     if (res.role === 'coach') router.replace(res.verified ? '/scout' : '/coach-pending');
     else router.replace('/feed');
   }
@@ -565,4 +697,9 @@ const styles = StyleSheet.create({
 
   forgotWrap: { alignSelf: 'flex-end', marginBottom: 8, marginTop: -4 },
   forgot: { fontSize: 12, color: colors.muted, textDecorationLine: 'underline' },
+  agreeRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 18, paddingRight: 8 },
+  agreeText: { flex: 1, fontFamily: fonts.condRegular, fontSize: 14, lineHeight: 20, color: colors.muted, marginTop: 1 },
+  agreeStrong: { color: colors.white, fontFamily: fonts.cond },
+  confirmEmail: { fontFamily: fonts.cond, fontSize: 17, color: colors.white, marginTop: 4, letterSpacing: 0.3 },
+  confirmNote: { fontFamily: fonts.condRegular, fontSize: 14, color: '#1E90FF', marginTop: 14, textAlign: 'center' },
 });
