@@ -68,6 +68,13 @@ async function signUpWith(email: string, password: string, profileRow: Record<st
   });
   if (error) return { ok: false, error: friendlyError(error.message) };
   if (!data.user) return { ok: false, error: 'We could not create your account. Please try again.' };
+  // An address that already has a confirmed account comes back as a fake success
+  // with an empty identities array (Supabase anti-enumeration) — and NO email is
+  // ever sent for it. Without this check the person lands on the "check your
+  // email" screen waiting for a message that will never arrive.
+  if (Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+    return { ok: false, error: 'An account with this email already exists. Log in instead.' };
+  }
   if (!data.session) return { ok: true, needsConfirm: true };
 
   const { error: insertError } = await insertProfile(data.user.id, profileRow);
