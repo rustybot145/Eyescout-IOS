@@ -64,10 +64,14 @@ begin
   -- Moderation records are ANONYMISED, not deleted. Otherwise anyone reported
   -- for harassment could erase the evidence by deleting their account. The
   -- report keeps its content; the personal identifiers come off.
+  -- reporter_id is TEXT, not uuid, on this project. Without the cast this is
+  -- `text = uuid`, which raises 42883 and — being the first statement now that
+  -- the storage delete is gone — aborts the whole function. That bug was always
+  -- here; migration 007's storage error just failed first and hid it.
   if to_regclass('public.reports') is not null then
     update public.reports
        set reporter_id = null, reporter_name = null
-     where reporter_id = v_uid;
+     where reporter_id = v_uid::text;
   end if;
 
   -- Child rows. Each predicate is scoped to the caller, so this can never touch
