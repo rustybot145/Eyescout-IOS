@@ -463,7 +463,9 @@ function ConfirmEmailView({ email, role, onBack }: {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
-  const [cooldown, setCooldown] = useState(0);
+  // Starts counting down: the signup email just went out, and Supabase will
+  // refuse another to this address for 60 seconds.
+  const [cooldown, setCooldown] = useState(60);
   const autoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (autoTimer.current) clearTimeout(autoTimer.current); }, []);
 
@@ -515,11 +517,23 @@ function ConfirmEmailView({ email, role, onBack }: {
     return () => clearTimeout(id);
   }, [cooldown]);
 
+  // Supabase refuses a second email to the same address within 60 seconds
+  // (429 over_email_send_rate_limit), and the SIGNUP email already started that
+  // clock — which is why this starts counting down on mount rather than
+  // offering a button that cannot work yet. On a refusal we count down the
+  // server's own "after N seconds" instead of stacking a fresh minute on top.
   async function resend() {
     if (cooldown) return;
-    setCooldown(60);
     const { error } = await supabase.auth.resend({ type: 'signup', email });
-    setNote(error ? 'Could not resend just now — try again in a minute.' : 'Sent — check your inbox.');
+    if (error) {
+      const m = /after (\d+) second/i.exec(error.message || '');
+      const wait = m ? parseInt(m[1], 10) : 60;
+      setCooldown(wait);
+      setNote(`Please wait ${wait}s before asking for another code.`);
+      return;
+    }
+    setCooldown(60);
+    setNote('Sent — check your inbox for the newest code.');
   }
 
   return (
