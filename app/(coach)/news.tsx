@@ -41,7 +41,7 @@ export default function CoachNewsScreen() {
     const c = coach || (await getCurrentCoach());
     if (c && !coach) setCoach(c);
     if (!c) return;
-    setPosts(await fetchFeed(c.id, c.sport === 'Multiple Sports' ? '' : c.sport));
+    setPosts(await fetchFeed(c.id, c.sport === 'Multiple Sports' ? [] : [c.sport]));
     setVisible(PAGE);
   }, [coach]);
 

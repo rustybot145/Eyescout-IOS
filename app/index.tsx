@@ -3,7 +3,7 @@ import { View } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { supabase } from '../src/lib/supabase';
-import { ensureProfile } from '../src/lib/auth';
+import { ensureProfile, signOutEverywhere } from '../src/lib/auth';
 import { colors } from '../src/theme/colors';
 import { IntroVideo } from '../src/components/IntroVideo';
 import { SignupQuiz } from '../src/components/SignupQuiz';
@@ -35,8 +35,28 @@ export default function Entry() {
   const [phase, setPhase] = useState<Phase>('checking');
 
   const routeByRole = useCallback(async (uid: string) => {
-    const { data: prof } = await supabase.from('profiles').select('role, verified').eq('id', uid).single();
-    if ((prof?.role || 'player') === 'coach') router.replace(prof?.verified ? '/scout' : '/coach-pending');
+    const read = () =>
+      supabase.from('profiles').select('role, verified').eq('id', uid).single();
+    let { data: prof } = await read();
+    if (!prof) {
+      // A session can exist before its profiles row does: the confirm-link
+      // adoption inserts the row a beat after setSession, and that insert can
+      // fail once (app backgrounded mid-handoff, network blip). Routing into
+      // the app anyway is what showed an empty feed, no stories, and a profile
+      // tab that bounced straight back — recover the row from the parked
+      // signup instead.
+      const { data: u } = await supabase.auth.getUser();
+      if (u.user) await ensureProfile(u.user);
+      ({ data: prof } = await read());
+    }
+    if (!prof) {
+      // Still no row and nothing to recover it from. An honest signed-out
+      // start beats a half-signed-in app where every tab is quietly broken.
+      await signOutEverywhere();
+      setPhase('intro');
+      return;
+    }
+    if (prof.role === 'coach') router.replace(prof.verified ? '/scout' : '/coach-pending');
     else router.replace('/feed');
   }, [router]);
 
@@ -55,7 +75,9 @@ export default function Entry() {
         const { data, error } = await supabase.auth.setSession(t);
         if (error || !data.session) return false;
         adopted = true;
-        await ensureProfile(data.session.user);
+        // Best-effort only — routeByRole re-runs ensureProfile if this failed,
+        // so one dropped request can no longer strand a session without a row.
+        await ensureProfile(data.session.user).catch(() => {});
         await routeByRole(data.session.user.id);
         return true;
       } catch {

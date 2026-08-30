@@ -31,7 +31,7 @@ import { Select } from './Select';
 import { SportMultiSelect } from './SportMultiSelect';
 import { TextField, PasswordField, FieldLabel, ErrorMsg } from './fields';
 import { SPORTS, COACH_SPORTS, GRAD_YEARS, DIVISIONS, TITLES, BIRTH_MONTHS, BIRTH_DAYS, BIRTH_YEARS } from '../theme/options';
-import { signUpPlayer, signUpCoach, signIn, forgotPassword } from '../lib/auth';
+import { signUpPlayer, signUpCoach, signIn, forgotPassword, ensureProfile } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 import { RoleSwitch } from './RoleSwitch';
 import { toast } from './Overlays';
@@ -468,9 +468,23 @@ function ConfirmEmailView({ email, password, role, onBack }: {
     if (checking.current) return false;
     checking.current = true;
     try {
-      // The deep-link bounce may have signed us in already; don't fight it.
+      // The deep-link bounce may have signed us in already. Don't just stop —
+      // its own routing can lose a race or fail once, which used to strand
+      // people here with a live session and no way forward. Finish the job:
+      // make sure the profiles row exists, then walk them in.
       const { data: sess } = await supabase.auth.getSession();
-      if (sess.session) return true; // Entry's listener routes; we just stop.
+      if (sess.session) {
+        await ensureProfile(sess.session.user).catch(() => {});
+        const { data: prof } = await supabase
+          .from('profiles').select('role, verified').eq('id', sess.session.user.id).single();
+        if (prof) {
+          if (prof.role === 'coach') router.replace(prof.verified ? '/scout' : '/coach-pending');
+          else router.replace('/feed');
+          return true;
+        }
+        // No row and none recoverable — fall through to the sign-in below,
+        // which reports the failure honestly instead of hanging forever.
+      }
       const res = await signIn(email, password, role);
       if (res.ok) {
         if (role === 'coach') router.replace(res.verified ? '/scout' : '/coach-pending');

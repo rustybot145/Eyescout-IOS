@@ -42,7 +42,7 @@ export default function FeedScreen() {
     const user = me || (await getCurrentUser());
     if (user && !me) setMe(user);
     if (!user) return;
-    setPosts(await fetchFeed(user.id, user.sport));
+    setPosts(await fetchFeed(user.id, user.sports));
     setVisible(PAGE);
   }, [me]);
 

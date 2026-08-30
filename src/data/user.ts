@@ -8,6 +8,7 @@ export type CurrentUser = {
   first: string;
   last: string;
   sport: string;
+  sports: string[]; // all their sports (multi-sport aware, like the web feed)
   jersey: string;
   gradYear: string;
   school: string;
@@ -26,7 +27,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   if (!uid) return null;
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, athlete_first, athlete_last, sport, jersey, grad_year, school, profile_photo, role, prefs')
+    .select('id, athlete_first, athlete_last, sport, sports, jersey, grad_year, school, profile_photo, role, prefs')
     .eq('id', uid)
     .single();
   if (error || !data) return null;
@@ -35,6 +36,8 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     first: data.athlete_first || '',
     last: data.athlete_last || '',
     sport: data.sport || '',
+    sports:
+      Array.isArray(data.sports) && data.sports.length ? data.sports : data.sport ? [data.sport] : [],
     jersey: data.jersey || '',
     gradYear: data.grad_year || '',
     school: data.school || '',

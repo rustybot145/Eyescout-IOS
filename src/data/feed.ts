@@ -28,8 +28,10 @@ export type FeedPost = {
 const SEL_POST =
   'id, author_id, author_name, author_jersey, sport, media_type, media_data, caption, tournament, created_at';
 
-// Fetch the feed for a user. Mirrors the web: strictly your sport, newest first.
-export async function fetchFeed(uid: string, mySport: string): Promise<FeedPost[]> {
+// Fetch the feed for a user. Mirrors the web: strictly your sport(s), newest
+// first. Multi-sport aware — a two-sport athlete sees both, exactly like the
+// web feed's getPlayerSports filter. Empty array = no sport filter.
+export async function fetchFeed(uid: string, mySports: string[]): Promise<FeedPost[]> {
   const { data: postRows } = await supabase
     .from('posts')
     .select(SEL_POST)
@@ -37,7 +39,8 @@ export async function fetchFeed(uid: string, mySport: string): Promise<FeedPost[
     .limit(100);
 
   let posts = postRows || [];
-  if (mySport) posts = posts.filter((p) => (p.sport || '').toLowerCase() === mySport.toLowerCase());
+  const lc = mySports.map((s) => (s || '').toLowerCase()).filter(Boolean);
+  if (lc.length) posts = posts.filter((p) => lc.includes((p.sport || '').toLowerCase()));
   // Blocked authors never reach the feed (Play UGC policy).
   const hidden = await fetchHiddenIds(uid);
   if (hidden.size) posts = posts.filter((p) => !hidden.has(p.author_id));
