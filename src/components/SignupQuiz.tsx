@@ -464,6 +464,8 @@ function ConfirmEmailView({ email, role, onBack }: {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
   const [cooldown, setCooldown] = useState(0);
+  const autoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (autoTimer.current) clearTimeout(autoTimer.current); }, []);
 
   // Confirmed → make sure the profiles row exists → route by the row's role
   // (not the tab they signed up on — the row is the truth).
@@ -476,9 +478,16 @@ function ConfirmEmailView({ email, role, onBack }: {
     else router.replace('/feed');
   }, [role, router]);
 
-  async function verify(raw?: string) {
+  // `quiet` = fired by typing rather than the button. Those stay silent on
+  // failure: the code length is a Supabase project setting (6-10 digits), so a
+  // short code is someone mid-type, not an error. Hard-coding 6 is what
+  // rejected a valid 8-digit code the instant the sixth digit landed.
+  async function verify(raw?: string, quiet = false) {
     const token = (raw ?? code).replace(/\D/g, '');
-    if (token.length !== 6) return setNote('Enter the 6-digit code from the email.');
+    if (token.length < 6) {
+      if (!quiet) setNote('Enter the code from the email.');
+      return;
+    }
     if (busy) return;
     setBusy(true);
     setNote('');
@@ -489,11 +498,12 @@ function ConfirmEmailView({ email, role, onBack }: {
       if (sess.session) return await walkIn(sess.session.user);
       const { data, error } = await supabase.auth.verifyOtp({ email, token, type: 'signup' });
       if (error || !data.session) {
-        return setNote('That code didn’t match — check the newest email and try again.');
+        if (!quiet) setNote('That code didn’t match — check the newest email and try again.');
+        return;
       }
       await walkIn(data.session.user);
     } catch {
-      setNote('Could not verify — check your connection and try again.');
+      if (!quiet) setNote('Could not verify — check your connection and try again.');
     } finally {
       setBusy(false);
     }
@@ -519,26 +529,30 @@ function ConfirmEmailView({ email, role, onBack }: {
           <Ionicons name="mail-unread-outline" size={54} color="#1E90FF" style={{ marginBottom: 18 }} />
           <Text style={[styles.bigQ, { textAlign: 'center' }]}>Check your email</Text>
           <Text style={[styles.sub, { textAlign: 'center', marginTop: 10 }]}>
-            Enter the 6-digit code we sent to
+            Enter the code we sent to
           </Text>
           <Text style={styles.confirmEmail}>{email}</Text>
           <TextInput
             style={styles.codeInput}
             value={code}
             onChangeText={(v) => {
-              const digits = v.replace(/\D/g, '').slice(0, 6);
+              const digits = v.replace(/\D/g, '').slice(0, 10);
               setCode(digits);
-              // Auto-verify on the sixth digit — matches what one-time-code
-              // autofill expects and saves a tap.
-              if (digits.length === 6) void verify(digits);
+              // Auto-verify shortly after typing stops, so the last digit signs
+              // you in without a tap — and a pause at six digits inside a longer
+              // code fails silently instead of shouting.
+              if (autoTimer.current) clearTimeout(autoTimer.current);
+              if (digits.length >= 6) {
+                autoTimer.current = setTimeout(() => void verify(digits, true), 650);
+              }
             }}
             keyboardType="number-pad"
             textContentType="oneTimeCode"
             autoComplete="one-time-code"
-            maxLength={6}
+            maxLength={10}
             placeholder="000000"
             placeholderTextColor="rgba(255,255,255,0.18)"
-            accessibilityLabel="6-digit verification code"
+            accessibilityLabel="Verification code from your email"
             editable={!busy}
           />
           <View style={{ height: 20 }} />
@@ -718,11 +732,13 @@ const styles = StyleSheet.create({
   agreeText: { flex: 1, fontFamily: fonts.condRegular, fontSize: 14, lineHeight: 20, color: colors.muted, marginTop: 1 },
   agreeStrong: { color: colors.white, fontFamily: fonts.cond },
   confirmEmail: { fontFamily: fonts.cond, fontSize: 17, color: colors.white, marginTop: 4, letterSpacing: 0.3 },
+  // Sized for the longest code Supabase can issue (10 digits), so a project set
+  // to 8 does not overflow the box.
   codeInput: {
-    alignSelf: 'center', width: 240, marginTop: 24, paddingVertical: 14,
+    alignSelf: 'center', width: 290, marginTop: 24, paddingVertical: 14,
     borderRadius: 12, borderWidth: 1, borderColor: 'rgba(30,144,255,0.45)',
     backgroundColor: 'rgba(30,144,255,0.08)', color: colors.white,
-    fontSize: 30, fontWeight: '800', textAlign: 'center', letterSpacing: 12,
+    fontSize: 26, fontWeight: '800', textAlign: 'center', letterSpacing: 6,
   },
   confirmNote: { fontFamily: fonts.condRegular, fontSize: 14, color: '#1E90FF', marginTop: 14, textAlign: 'center' },
 });
