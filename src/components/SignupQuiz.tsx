@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
+  TextInput,
   Image,
   Pressable,
   StyleSheet,
@@ -115,9 +116,8 @@ export function SignupQuiz() {
 
   const [agree13, setAgree13] = useState(false);
   // Set when signup succeeded but the email is unconfirmed — swaps the quiz for
-  // the "check your email" screen, credentials held so it can sign in the moment
-  // the link is tapped.
-  const [waiting, setWaiting] = useState<null | { email: string; password: string; role: Role }>(null);
+  // the "enter your code" screen.
+  const [waiting, setWaiting] = useState<null | { email: string; role: Role }>(null);
 
   function validateStep(): string {
     if (role === 'player') {
@@ -169,7 +169,7 @@ export function SignupQuiz() {
       const res = await signUpPlayer({ ...rest, sport: rest.sports[0], birth_date });
       if (!res.ok) {
         setBusy(false);
-        if ('needsConfirm' in res) return setWaiting({ email: res.email, password: pf.password, role: 'player' });
+        if ('needsConfirm' in res) return setWaiting({ email: res.email, role: 'player' });
         return setErr(res.error);
       }
       // Used to drop the brand-new player onto the Pro offer. Nothing is sold
@@ -180,7 +180,7 @@ export function SignupQuiz() {
       const res = await signUpCoach(cf);
       if (!res.ok) {
         setBusy(false);
-        if ('needsConfirm' in res) return setWaiting({ email: res.email, password: cf.password, role: 'coach' });
+        if ('needsConfirm' in res) return setWaiting({ email: res.email, role: 'coach' });
         return setErr(res.error);
       }
       toast('Account created — pending verification');
@@ -447,65 +447,57 @@ export function SignupQuiz() {
 // `signIn` enforces it: a coach's credentials on the Player tab are rejected
 // with a message telling them to switch, rather than silently logging them into
 // the wrong side of the app.
-// Shown after signup while the confirmation email sits unopened — the mobile
-// twin of the web's confirm-email.html waiting page. Two ways forward, both
-// automatic where possible:
-//   • Same phone: the email link opens login.html in Safari, which verifies and
-//     bounces back via eyescout:// with the session — Entry adopts it and this
-//     screen simply unmounts. Nothing here has to do anything.
-//   • Confirmed elsewhere (laptop, parent's phone): the poll below retries a
-//     real sign-in every few seconds and walks them in the moment it succeeds.
-function ConfirmEmailView({ email, password, role, onBack }: {
-  email: string; password: string; role: Role; onBack: () => void;
+// Shown after signup while the account is unconfirmed — the mobile twin of the
+// web's confirm-email.html. The email carries a 6-digit code; typing it here
+// runs verifyOtp, which confirms the account and returns a session IN this app,
+// so nothing ever leaves for Safari and bounces back. (The old link handoff is
+// what kept breaking: Safari → login.html → eyescout:// → adopt, four hops that
+// each had a way to fail. The code is one hop.) The email also keeps a small
+// fallback link — if someone taps that instead, Entry's deep-link listener still
+// adopts the session and this screen unmounts on its own.
+function ConfirmEmailView({ email, role, onBack }: {
+  email: string; role: Role; onBack: () => void;
 }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
   const [cooldown, setCooldown] = useState(0);
-  const checking = useRef(false);
 
-  const enter = React.useCallback(async (): Promise<boolean> => {
-    if (checking.current) return false;
-    checking.current = true;
+  // Confirmed → make sure the profiles row exists → route by the row's role
+  // (not the tab they signed up on — the row is the truth).
+  const walkIn = React.useCallback(async (user: { id: string; user_metadata?: Record<string, any> | null }) => {
+    await ensureProfile(user).catch(() => {});
+    const { data: prof } = await supabase
+      .from('profiles').select('role, verified').eq('id', user.id).single();
+    const r = (prof?.role as Role) || role;
+    if (r === 'coach') router.replace(prof?.verified ? '/scout' : '/coach-pending');
+    else router.replace('/feed');
+  }, [role, router]);
+
+  async function verify(raw?: string) {
+    const token = (raw ?? code).replace(/\D/g, '');
+    if (token.length !== 6) return setNote('Enter the 6-digit code from the email.');
+    if (busy) return;
+    setBusy(true);
+    setNote('');
     try {
-      // The deep-link bounce may have signed us in already. Don't just stop —
-      // its own routing can lose a race or fail once, which used to strand
-      // people here with a live session and no way forward. Finish the job:
-      // make sure the profiles row exists, then walk them in.
+      // If they tapped the email's fallback link first, the session is already
+      // here — the code was spent confirming, so don't fail them for that.
       const { data: sess } = await supabase.auth.getSession();
-      if (sess.session) {
-        await ensureProfile(sess.session.user).catch(() => {});
-        const { data: prof } = await supabase
-          .from('profiles').select('role, verified').eq('id', sess.session.user.id).single();
-        if (prof) {
-          if (prof.role === 'coach') router.replace(prof.verified ? '/scout' : '/coach-pending');
-          else router.replace('/feed');
-          return true;
-        }
-        // No row and none recoverable — fall through to the sign-in below,
-        // which reports the failure honestly instead of hanging forever.
+      if (sess.session) return await walkIn(sess.session.user);
+      const { data, error } = await supabase.auth.verifyOtp({ email, token, type: 'signup' });
+      if (error || !data.session) {
+        return setNote('That code didn’t match — check the newest email and try again.');
       }
-      const res = await signIn(email, password, role);
-      if (res.ok) {
-        if (role === 'coach') router.replace(res.verified ? '/scout' : '/coach-pending');
-        else router.replace('/feed');
-        return true;
-      }
-      return false;
+      await walkIn(data.session.user);
+    } catch {
+      setNote('Could not verify — check your connection and try again.');
     } finally {
-      checking.current = false;
+      setBusy(false);
     }
-  }, [email, password, role, router]);
-
-  useEffect(() => {
-    // 8s, capped at ~5 minutes: the deep-link bounce is the primary path and
-    // needs no polling at all; this is only for "confirmed on another device",
-    // and a tighter loop of failed password grants would court GoTrue's
-    // per-IP rate limit — whose 429 lands on the login endpoint we need working.
-    let n = 0;
-    const id = setInterval(() => { if (++n > 40) return clearInterval(id); void enter(); }, 8000);
-    return () => clearInterval(id);
-  }, [enter]);
+  }
 
   useEffect(() => {
     if (!cooldown) return;
@@ -520,30 +512,41 @@ function ConfirmEmailView({ email, password, role, onBack }: {
     setNote(error ? 'Could not resend just now — try again in a minute.' : 'Sent — check your inbox.');
   }
 
-  async function manualCheck() {
-    setNote('');
-    if (!(await enter())) setNote("Not confirmed yet — tap the link in your email first.");
-  }
-
   return (
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
       <View style={[styles.container, { paddingTop: insets.top + 72, paddingBottom: insets.bottom + 24, alignItems: 'center' }]}>
-        <Animated.View entering={FadeIn.duration(400)} style={{ alignItems: 'center' }}>
+        <Animated.View entering={FadeIn.duration(400)} style={{ alignItems: 'center', alignSelf: 'stretch' }}>
           <Ionicons name="mail-unread-outline" size={54} color="#1E90FF" style={{ marginBottom: 18 }} />
           <Text style={[styles.bigQ, { textAlign: 'center' }]}>Check your email</Text>
           <Text style={[styles.sub, { textAlign: 'center', marginTop: 10 }]}>
-            We sent a confirmation link to
+            Enter the 6-digit code we sent to
           </Text>
           <Text style={styles.confirmEmail}>{email}</Text>
-          <Text style={[styles.sub, { textAlign: 'center', marginTop: 14, lineHeight: 22 }]}>
-            Tap the link and we'll sign you in automatically — keep this screen open.
-          </Text>
-          <View style={{ height: 28 }} />
-          <GradientButton label="I've confirmed — let's go" onPress={manualCheck} />
+          <TextInput
+            style={styles.codeInput}
+            value={code}
+            onChangeText={(v) => {
+              const digits = v.replace(/\D/g, '').slice(0, 6);
+              setCode(digits);
+              // Auto-verify on the sixth digit — matches what one-time-code
+              // autofill expects and saves a tap.
+              if (digits.length === 6) void verify(digits);
+            }}
+            keyboardType="number-pad"
+            textContentType="oneTimeCode"
+            autoComplete="one-time-code"
+            maxLength={6}
+            placeholder="000000"
+            placeholderTextColor="rgba(255,255,255,0.18)"
+            accessibilityLabel="6-digit verification code"
+            editable={!busy}
+          />
+          <View style={{ height: 20 }} />
+          <GradientButton label={busy ? 'Verifying…' : 'Verify & Continue'} onPress={() => void verify()} disabled={busy} />
           {note ? <Text style={styles.confirmNote}>{note}</Text> : null}
           <Pressable onPress={resend} disabled={!!cooldown} style={{ marginTop: 22 }}>
             <Text style={[styles.forgot, cooldown ? { opacity: 0.45 } : null]}>
-              {cooldown ? `Resend email (${cooldown}s)` : 'Resend email'}
+              {cooldown ? `Resend code (${cooldown}s)` : 'Resend code'}
             </Text>
           </Pressable>
           <Pressable onPress={onBack} style={{ marginTop: 14 }}>
@@ -715,5 +718,11 @@ const styles = StyleSheet.create({
   agreeText: { flex: 1, fontFamily: fonts.condRegular, fontSize: 14, lineHeight: 20, color: colors.muted, marginTop: 1 },
   agreeStrong: { color: colors.white, fontFamily: fonts.cond },
   confirmEmail: { fontFamily: fonts.cond, fontSize: 17, color: colors.white, marginTop: 4, letterSpacing: 0.3 },
+  codeInput: {
+    alignSelf: 'center', width: 240, marginTop: 24, paddingVertical: 14,
+    borderRadius: 12, borderWidth: 1, borderColor: 'rgba(30,144,255,0.45)',
+    backgroundColor: 'rgba(30,144,255,0.08)', color: colors.white,
+    fontSize: 30, fontWeight: '800', textAlign: 'center', letterSpacing: 12,
+  },
   confirmNote: { fontFamily: fonts.condRegular, fontSize: 14, color: '#1E90FF', marginTop: 14, textAlign: 'center' },
 });

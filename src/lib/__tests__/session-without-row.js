@@ -45,17 +45,24 @@ assert.ok(
     'a signed-out start beats an app where every tab is quietly broken',
 );
 
-// ── 4. The waiting screen must not stall on a bare session ──────────────────
-const enterBody = quiz.slice(quiz.indexOf('const enter'), quiz.indexOf('useEffect', quiz.indexOf('const enter')));
+// ── 4. Confirmation happens IN the screen, via the emailed code ─────────────
+// The old flow handed off to Safari and back (four hops, each with a way to
+// fail). The code flow must verify right here and then walk the person in.
+const confirmBody = quiz.slice(quiz.indexOf('function ConfirmEmailView'), quiz.indexOf('function LoginView'));
 assert.ok(
-  !/if \(sess\.session\) return true/.test(enterBody),
-  "ConfirmEmailView.enter() must not 'return true' on a bare session — that " +
-    'left people stranded on the waiting screen with a live session',
+  /verifyOtp\(\{\s*email,\s*token,\s*type:\s*'signup'\s*\}\)/.test(confirmBody),
+  "ConfirmEmailView must confirm with verifyOtp({ email, token, type: 'signup' }) — " +
+    'the 6-digit code from the email, no browser handoff',
 );
 assert.ok(
-  /ensureProfile\(/.test(enterBody) && /router\.replace\(/.test(enterBody),
-  'ConfirmEmailView.enter() must ensure the profiles row and route when a ' +
-    'session already exists',
+  /ensureProfile\(/.test(confirmBody) && /router\.replace\(/.test(confirmBody),
+  'ConfirmEmailView must ensure the profiles row exists and route the person ' +
+    'in after a successful verify — a session without its row is the bug this ' +
+    'file exists to prevent',
+);
+assert.ok(
+  !/if \(sess\.session\) return true/.test(confirmBody),
+  'ConfirmEmailView must never stop dead on a bare session — finish the walk-in instead',
 );
 
 // ── 5. Feed filter must be multi-sport, like the web ────────────────────────
